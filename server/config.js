@@ -7,7 +7,11 @@ const config = {
   port: parseInt(process.env.PORT || '8000', 10),
   nodeEnv: process.env.NODE_ENV || 'development',
 
-  // AI Brain (OpenCode CLI)
+  // AI Brain (DeepSeek)
+  deepseekApiKey: process.env.DEEPSEEK_API_KEY || '',
+  deepseekModel: process.env.DEEPSEEK_MODEL || 'deepseek-chat',
+
+  // Legacy (kept for reference)
   anthropicApiKey: process.env.ANTHROPIC_API_KEY || '',
   aiModel: process.env.AI_MODEL || 'claude-sonnet-4-6',
 

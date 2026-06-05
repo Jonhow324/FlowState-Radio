@@ -1,105 +1,197 @@
 // api/player.js — Player control endpoints
-// POST /api/player/play — Play (optionally with trackId)
-// POST /api/player/pause — Pause
-// POST /api/player/skip — Skip to next
-// POST /api/player/volume — Set volume
+// POST /api/player/play    — Play (optionally with trackId, fetches NCM URL)
+// POST /api/player/pause   — Pause
+// POST /api/player/skip    — Skip to next (fetches NCM URL for next track)
+// POST /api/player/volume  — Set volume
 
 const express = require('express');
 const router = express.Router();
 const state = require('../state');
+const ncm = require('../services/ncm');
 const logger = require('../utils/logger');
 
-// POST /play
-router.post('/play', (req, res) => {
+/**
+ * POST /api/player/play
+ * Body: { trackId?: string }
+ * If trackId given: fetch URL from NCM, start playing
+ * If no trackId: resume current or play next from queue
+ */
+router.post('/play', async (req, res) => {
   const { trackId } = req.body;
+  const broadcast = req.app.get('broadcast');
 
-  if (trackId) {
-    // Play specific track
-    state.updateCurrentState({
-      now_playing_track_id: trackId,
-      now_playing_started: new Date().toISOString(),
-      is_playing: true,
-    });
-    logger.info('PLAYER', `Playing track: ${trackId}`);
-  } else {
-    // Resume or play next from queue
+  try {
+    if (trackId) {
+      // Play specific track — fetch URL from NCM
+      const [url, details] = await Promise.all([
+        ncm.getSongUrl(trackId),
+        ncm.getSongDetail([trackId]),
+      ]);
+
+      if (!url) {
+        return res.status(404).json({ error: 'Song URL not available' });
+      }
+
+      // Store metadata
+      if (details.length > 0) {
+        state.setTrackMeta(trackId, details[0]);
+      }
+
+      state.updateCurrentState({
+        now_playing_track_id: trackId,
+        now_playing_started: new Date().toISOString(),
+        is_playing: true,
+      });
+      state.logPlay(trackId, details[0]?.trackName, details[0]?.artist, 'manual', 'User selected');
+
+      const meta = state.getTrackMeta(trackId);
+      const nowPlayingData = {
+        trackId,
+        trackName: meta?.track_name || details[0]?.trackName || 'Unknown',
+        artist: meta?.artist || details[0]?.artist || 'Unknown',
+        albumArt: meta?.album_art || details[0]?.albumArt || null,
+        url,
+      };
+
+      logger.info('PLAYER', `Playing: ${nowPlayingData.trackName} - ${nowPlayingData.artist}`);
+
+      if (broadcast) {
+        broadcast({ type: 'now-playing', data: nowPlayingData });
+      }
+
+      return res.json({ success: true, nowPlaying: nowPlayingData });
+    }
+
+    // No trackId — resume or play next from queue
     const current = state.getCurrentState();
     if (current.now_playing_track_id && !current.is_playing) {
-      // Resume
+      // Resume — need to get URL again (may have expired from cache)
+      const url = await ncm.getSongUrl(current.now_playing_track_id);
       state.updateCurrentState({ is_playing: true });
-      logger.info('PLAYER', 'Resumed playback');
-    } else {
-      // Play next from queue
-      const next = state.shiftQueue();
-      if (next) {
-        state.updateCurrentState({
-          now_playing_track_id: next.track_id,
-          now_playing_started: new Date().toISOString(),
-          is_playing: true,
-        });
-        logger.info('PLAYER', `Playing next from queue: ${next.track_id}`);
-      } else {
-        logger.info('PLAYER', 'Queue is empty');
+
+      if (broadcast) {
+        broadcast({ type: 'now-playing', data: { ...state.getCurrentState(), url } });
       }
+
+      return res.json({ success: true, action: 'resumed', url });
     }
-  }
 
-  const broadcast = req.app.get('broadcast');
-  if (broadcast) {
-    broadcast({ type: 'now-playing', data: state.getCurrentState() });
-  }
+    // Play next from queue
+    const next = state.shiftQueue();
+    if (next) {
+      const url = await ncm.getSongUrl(next.track_id);
+      state.updateCurrentState({
+        now_playing_track_id: next.track_id,
+        now_playing_started: new Date().toISOString(),
+        is_playing: true,
+      });
+      state.logPlay(next.track_id, next.track_name, next.artist, 'queue', 'Auto next');
 
-  res.json({ success: true, state: state.getCurrentState() });
+      const meta = state.getTrackMeta(next.track_id);
+      const nowPlayingData = {
+        trackId: next.track_id,
+        trackName: meta?.track_name || next.track_name,
+        artist: meta?.artist || next.artist,
+        albumArt: meta?.album_art || null,
+        url,
+      };
+
+      if (broadcast) {
+        broadcast({ type: 'now-playing', data: nowPlayingData });
+      }
+
+      // Auto-refill queue if running low
+      if (state.getQueueLength() < 3) {
+        logger.info('PLAYER', 'Queue running low, needs refill');
+      }
+
+      return res.json({ success: true, nowPlaying: nowPlayingData });
+    }
+
+    return res.json({ success: false, reason: 'Queue is empty' });
+  } catch (error) {
+    logger.error('PLAYER', `Play error: ${error.message}`);
+    res.status(500).json({ error: 'Play failed', detail: error.message });
+  }
 });
 
-// POST /pause
+/**
+ * POST /api/player/pause
+ */
 router.post('/pause', (req, res) => {
   state.updateCurrentState({ is_playing: false });
-  logger.info('PLAYER', 'Paused playback');
+  logger.info('PLAYER', 'Paused');
 
   const broadcast = req.app.get('broadcast');
   if (broadcast) {
     broadcast({ type: 'now-playing', data: state.getCurrentState() });
   }
 
-  res.json({ success: true, state: state.getCurrentState() });
+  res.json({ success: true });
 });
 
-// POST /skip
-router.post('/skip', (req, res) => {
-  const next = state.shiftQueue();
+/**
+ * POST /api/player/skip
+ * Skip to next track in queue, fetch URL from NCM
+ */
+router.post('/skip', async (req, res) => {
+  const broadcast = req.app.get('broadcast');
 
-  if (next) {
-    state.updateCurrentState({
-      now_playing_track_id: next.track_id,
-      now_playing_started: new Date().toISOString(),
-      is_playing: true,
-    });
-    logger.info('PLAYER', `Skipped to: ${next.track_id}`);
-  } else {
+  try {
+    const next = state.shiftQueue();
+
+    if (next) {
+      const url = await ncm.getSongUrl(next.track_id);
+      state.updateCurrentState({
+        now_playing_track_id: next.track_id,
+        now_playing_started: new Date().toISOString(),
+        is_playing: true,
+      });
+      state.logPlay(next.track_id, next.track_name, next.artist, 'skip', 'User skipped');
+
+      const meta = state.getTrackMeta(next.track_id);
+      const nowPlayingData = {
+        trackId: next.track_id,
+        trackName: meta?.track_name || next.track_name,
+        artist: meta?.artist || next.artist,
+        albumArt: meta?.album_art || null,
+        url,
+      };
+
+      logger.info('PLAYER', `Skipped to: ${nowPlayingData.trackName}`);
+
+      if (broadcast) {
+        broadcast({ type: 'now-playing', data: nowPlayingData });
+      }
+
+      return res.json({ success: true, nowPlaying: nowPlayingData });
+    }
+
+    // Queue empty
     state.updateCurrentState({ is_playing: false, now_playing_track_id: null });
     logger.info('PLAYER', 'Skipped — queue empty, stopped');
-  }
 
-  const broadcast = req.app.get('broadcast');
-  if (broadcast) {
-    broadcast({ type: 'now-playing', data: state.getCurrentState() });
-  }
+    if (broadcast) {
+      broadcast({ type: 'now-playing', data: state.getCurrentState() });
+    }
 
-  res.json({ success: true, state: state.getCurrentState(), nextTrack: next });
+    return res.json({ success: true, nowPlaying: null });
+  } catch (error) {
+    logger.error('PLAYER', `Skip error: ${error.message}`);
+    res.status(500).json({ error: 'Skip failed' });
+  }
 });
 
-// POST /volume
+/**
+ * POST /api/player/volume
+ */
 router.post('/volume', (req, res) => {
   const { volume } = req.body;
-
   if (typeof volume !== 'number' || volume < 0 || volume > 1) {
-    return res.status(400).json({ error: 'Volume must be a number between 0.0 and 1.0' });
+    return res.status(400).json({ error: 'Volume must be 0.0 ~ 1.0' });
   }
-
   state.updateCurrentState({ volume });
-  logger.info('PLAYER', `Volume set to: ${volume}`);
-
+  logger.info('PLAYER', `Volume: ${volume}`);
   res.json({ success: true, volume });
 });
 

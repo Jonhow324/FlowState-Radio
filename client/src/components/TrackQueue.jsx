@@ -1,7 +1,15 @@
+import { useEffect } from 'react';
 import useAppStore from '../stores/appStore.js';
 
 function TrackQueue() {
-  const { queue } = useAppStore();
+  const { queue, refreshQueue } = useAppStore();
+
+  // Refresh queue every 5 seconds
+  useEffect(() => {
+    refreshQueue();
+    const interval = setInterval(refreshQueue, 5000);
+    return () => clearInterval(interval);
+  }, []);
 
   if (!queue || queue.length === 0) {
     return (

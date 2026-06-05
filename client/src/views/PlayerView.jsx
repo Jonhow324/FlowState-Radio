@@ -1,4 +1,5 @@
 import Player from '../components/Player.jsx';
+import SearchBar from '../components/SearchBar.jsx';
 import DJMessage from '../components/DJMessage.jsx';
 import ChatInput from '../components/ChatInput.jsx';
 import TrackQueue from '../components/TrackQueue.jsx';
@@ -9,6 +10,7 @@ function PlayerView() {
 
   return (
     <div>
+      <SearchBar />
       <Player />
       <DJMessage message={djMessage} />
       <TrackQueue />

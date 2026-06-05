@@ -61,6 +61,8 @@ async function startServer() {
 
   // ===== API Routes =====
   app.use('/api/chat', require('./api/chat'));
+  app.use('/api/search', require('./api/search'));
+  app.use('/api/song', require('./api/song'));
   app.use('/api/now', require('./api/now'));
   app.use('/api/next', require('./api/next'));
   app.use('/api/queue', require('./api/queue'));

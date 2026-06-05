@@ -2,7 +2,16 @@ import { motion } from 'framer-motion';
 import useAppStore from '../stores/appStore.js';
 
 function Player() {
-  const { currentTrack, isPlaying, togglePlay, skipNext, skipPrev } = useAppStore();
+  const { currentTrack, isPlaying, progress, duration, togglePlay, skipNext, skipPrev } = useAppStore();
+
+  const progressPercent = duration > 0 ? (progress / duration) * 100 : 0;
+
+  function formatTime(seconds) {
+    if (!seconds || isNaN(seconds)) return '0:00';
+    const m = Math.floor(seconds / 60);
+    const s = Math.floor(seconds % 60);
+    return `${m}:${String(s).padStart(2, '0')}`;
+  }
 
   return (
     <div className="flex flex-col items-center px-6">
@@ -53,12 +62,13 @@ function Player() {
         <div className="h-1 bg-white/10 rounded-full overflow-hidden">
           <motion.div
             className="h-full bg-claudio-500 rounded-full"
-            style={{ width: '0%' }}
+            style={{ width: `${progressPercent}%` }}
+            transition={{ duration: 0.3 }}
           />
         </div>
         <div className="flex justify-between text-xs text-white/30 mt-1">
-          <span>0:00</span>
-          <span>--:--</span>
+          <span>{formatTime(progress)}</span>
+          <span>{formatTime(duration)}</span>
         </div>
       </div>
 

@@ -1,0 +1,10 @@
+{
+  "imported": [
+    { "id": "123456789", "name": "周杰伦全集", "source": "netease" },
+    { "id": "987654321", "name": "深夜coding", "source": "netease" },
+    { "id": "555555555", "name": "开车专用", "source": "netease" }
+  ],
+  "custom": [
+    { "name": "我的最爱", "trackIds": ["111", "222", "333"] }
+  ]
+}

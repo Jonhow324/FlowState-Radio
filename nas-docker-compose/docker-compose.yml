@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  ncm-api:
+    # 使用 Enhanced 社区维护版（基于本地 Dockerfile 构建）
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: claudio-ncm-enhanced:latest
+    container_name: claudio-ncm
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+    # 如需登录网易云账号（获取更高音质/个性化推荐），取消下面的注释：
+    # environment:
+    #   - NCM_COOKIE=MUSIC_U=你的cookie值
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

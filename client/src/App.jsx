@@ -5,6 +5,7 @@ import PlayerView from './views/PlayerView.jsx';
 import ProfileView from './views/ProfileView.jsx';
 import SettingsView from './views/SettingsView.jsx';
 import NowPlayingBar from './components/NowPlayingBar.jsx';
+import useMediaSession from './hooks/useMediaSession.js';
 
 const VIEWS = {
   player: PlayerView,
@@ -15,6 +16,9 @@ const VIEWS = {
 function App() {
   const [activeView, setActiveView] = useState('player');
   const ActiveComponent = VIEWS[activeView];
+
+  // Enable system media controls (lock screen, notification bar)
+  useMediaSession();
 
   return (
     <div className="min-h-screen flex flex-col max-w-lg mx-auto relative">
@@ -43,7 +47,9 @@ function App() {
       </main>
 
       {/* Now Playing Bar (shown when not on player view) */}
-      {activeView !== 'player' && <NowPlayingBar />}
+      <AnimatePresence>
+        {activeView !== 'player' && <NowPlayingBar />}
+      </AnimatePresence>
 
       {/* Bottom Navigation */}
       <NavBar activeView={activeView} onViewChange={setActiveView} />

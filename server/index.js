@@ -72,6 +72,7 @@ async function startServer() {
   app.use('/api/player', require('./api/player'));
   app.use('/api/dj', require('./api/dj'));
   app.use('/api/scheduler', require('./api/scheduler-api'));
+  app.use('/api/stats', require('./api/stats'));
 
   // Health check
   app.get('/api/health', (req, res) => {

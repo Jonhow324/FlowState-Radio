@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import api from '../services/api.js';
 import useAppStore from '../stores/appStore.js';
 
@@ -76,29 +77,45 @@ function SearchBar() {
       </div>
 
       {/* Search results dropdown */}
-      {isExpanded && results.length > 0 && (
-        <div className="absolute left-0 right-0 top-full mt-2 z-50">
-          <div className="bg-slate-900/98 backdrop-blur-md rounded-xl border border-white/10 shadow-2xl overflow-hidden">
-            <div className="max-h-80 overflow-y-auto">
-              {results.map((track) => (
-                <SearchResultItem
-                  key={track.trackId}
-                  track={track}
-                  onSelect={() => setIsExpanded(false)}
-                />
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Backdrop to close dropdown */}
-      {isExpanded && (
-        <div
-          className="fixed inset-0 z-40"
-          onClick={() => setIsExpanded(false)}
-        />
-      )}
+      <AnimatePresence>
+        {isExpanded && results.length > 0 && (
+          <>
+            {/* Backdrop to close dropdown */}
+            <motion.div
+              className="fixed inset-0 z-40"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsExpanded(false)}
+            />
+            <motion.div
+              className="absolute left-0 right-0 top-full mt-2 z-50"
+              initial={{ opacity: 0, y: -8, scale: 0.97 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -8, scale: 0.97 }}
+              transition={{ duration: 0.2, ease: 'easeOut' }}
+            >
+              <div className="bg-slate-900/98 backdrop-blur-md rounded-xl border border-white/10 shadow-2xl overflow-hidden">
+                <div className="max-h-80 overflow-y-auto">
+                  {results.map((track, i) => (
+                    <motion.div
+                      key={track.trackId}
+                      initial={{ opacity: 0, x: -10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: i * 0.04, duration: 0.2 }}
+                    >
+                      <SearchResultItem
+                        track={track}
+                        onSelect={() => setIsExpanded(false)}
+                      />
+                    </motion.div>
+                  ))}
+                </div>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

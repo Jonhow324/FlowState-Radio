@@ -209,6 +209,38 @@ function getRecentPlays(limit = 20) {
   return queryAll('SELECT * FROM plays ORDER BY played_at DESC LIMIT ?', [limit]);
 }
 
+/**
+ * Get play statistics
+ */
+function getPlayStats() {
+  const today = new Date().toISOString().slice(0, 10);
+  const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+
+  const todayCount = queryOne(
+    "SELECT COUNT(*) as count FROM plays WHERE date(played_at) = ?",
+    [today]
+  );
+  const weekCount = queryOne(
+    "SELECT COUNT(*) as count FROM plays WHERE played_at >= ?",
+    [weekAgo]
+  );
+  const totalCount = queryOne('SELECT COUNT(*) as count FROM plays');
+  const topArtists = queryAll(
+    "SELECT artist, COUNT(*) as count FROM plays WHERE artist IS NOT NULL GROUP BY artist ORDER BY count DESC LIMIT 5"
+  );
+  const topTracks = queryAll(
+    "SELECT track_name, artist, COUNT(*) as count FROM plays WHERE track_name IS NOT NULL GROUP BY track_name, artist ORDER BY count DESC LIMIT 5"
+  );
+
+  return {
+    today: todayCount?.count || 0,
+    week: weekCount?.count || 0,
+    total: totalCount?.count || 0,
+    topArtists: topArtists || [],
+    topTracks: topTracks || [],
+  };
+}
+
 // ===== Messages =====
 
 function logMessage(role, content, audioPath) {
@@ -403,6 +435,7 @@ module.exports = {
   initDatabase,
   logPlay,
   getRecentPlays,
+  getPlayStats,
   logMessage,
   getRecentMessages,
   saveTodayPlan,

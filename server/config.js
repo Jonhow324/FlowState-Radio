@@ -27,6 +27,7 @@ const config = {
 
   // NCM API
   ncmApiUrl: process.env.NCM_API_URL || 'http://localhost:3000',
+  ncmCookie: process.env.NCM_COOKIE || '',
 
   // Paths
   dataDir: require('path').resolve(__dirname, '../data'),

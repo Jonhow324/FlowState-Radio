@@ -9,11 +9,10 @@ services:
     image: claudio-ncm-enhanced:latest
     container_name: claudio-ncm
     ports:
-      - "3000:3000"
+      - "3761:3000"
     restart: unless-stopped
-    # 如需登录网易云账号（获取更高音质/个性化推荐），取消下面的注释：
-    # environment:
-    #   - NCM_COOKIE=MUSIC_U=你的cookie值
+    environment:
+      - MUSIC_U=your_netease_music_u_token_here
     logging:
       driver: json-file
       options:

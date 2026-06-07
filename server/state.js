@@ -226,17 +226,24 @@ function getRecentMessages(limit = 5) {
 
 function saveTodayPlan(planJson) {
   const today = new Date().toISOString().slice(0, 10);
+  const jsonStr = typeof planJson === 'string' ? planJson : JSON.stringify(planJson);
   // Use INSERT OR REPLACE
   mutate(
     'INSERT OR REPLACE INTO daily_plans (date, plan_json) VALUES (?, ?)',
-    [today, planJson]
+    [today, jsonStr]
   );
 }
 
 function getTodayPlan() {
   const today = new Date().toISOString().slice(0, 10);
   const row = queryOne('SELECT * FROM daily_plans WHERE date = ?', [today]);
-  return row ? JSON.parse(row.plan_json) : null;
+  if (!row) return null;
+  try {
+    const parsed = JSON.parse(row.plan_json);
+    return { ...parsed, date: row.date };
+  } catch {
+    return { raw: row.plan_json, date: row.date };
+  }
 }
 
 // ===== Preferences =====

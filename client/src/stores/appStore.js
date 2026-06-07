@@ -5,6 +5,10 @@ import api from '../services/api.js';
 const audio = new Audio();
 audio.preload = 'auto';
 
+// TTS audio element (separate from music)
+const ttsAudio = new Audio();
+ttsAudio.preload = 'auto';
+
 const useAppStore = create((set, get) => ({
   // Current track info
   currentTrack: null,
@@ -16,6 +20,7 @@ const useAppStore = create((set, get) => ({
   // DJ
   activeDj: 'zh',
   djMessage: null,
+  isSpeaking: false, // Whether TTS is currently playing
 
   // Queue
   queue: [],
@@ -47,10 +52,75 @@ const useAppStore = create((set, get) => ({
       set({ isPlaying: false });
     });
 
+    // TTS audio events
+    ttsAudio.addEventListener('play', () => set({ isSpeaking: true }));
+    ttsAudio.addEventListener('ended', () => {
+      set({ isSpeaking: false });
+      // Resume music after TTS finishes
+      if (audio.src && get().isPlaying) {
+        audio.play().catch(console.error);
+      }
+    });
+    ttsAudio.addEventListener('error', () => set({ isSpeaking: false }));
+
     set({ _audioInitialized: true });
   },
 
   // ===== Player actions =====
+
+  /**
+   * Play TTS audio (DJ voice)
+   * @param {string} ttsUrl - URL to the TTS mp3 file
+   */
+  playTTS: (ttsUrl) => {
+    if (!ttsUrl) return;
+    get().initAudio();
+
+    // Pause music while TTS plays
+    const wasPlaying = audio.src && !audio.paused;
+    if (wasPlaying) {
+      audio.pause();
+    }
+
+    ttsAudio.src = ttsUrl;
+    ttsAudio.volume = get().volume;
+    ttsAudio.play().catch((err) => {
+      console.warn('[TTS] Play failed:', err);
+      set({ isSpeaking: false });
+      // Resume music if TTS fails
+      if (wasPlaying) audio.play().catch(console.error);
+    });
+    set({ isSpeaking: true });
+  },
+
+  /**
+   * Play DJ talk + song: first TTS, then the track
+   * @param {string} ttsUrl - TTS audio URL (can be null)
+   * @param {string} trackUrl - Song audio URL
+   * @param {object} trackInfo - Track metadata
+   */
+  playWithTTS: (ttsUrl, trackUrl, trackInfo) => {
+    if (ttsUrl) {
+      // Set up the track to play after TTS
+      get().initAudio();
+      audio.src = trackUrl;
+      audio.volume = get().volume;
+      set({ currentTrack: trackInfo, progress: 0 });
+
+      // Play TTS first; the 'ended' event will resume audio
+      ttsAudio.src = ttsUrl;
+      ttsAudio.volume = get().volume;
+      ttsAudio.play().catch((err) => {
+        console.warn('[TTS] Play failed, playing track directly:', err);
+        audio.play().catch(console.error);
+        set({ isPlaying: true, isSpeaking: false });
+      });
+      set({ isSpeaking: true, isPlaying: true });
+    } else {
+      // No TTS, play track directly
+      get().playTrack(trackUrl, trackInfo);
+    }
+  },
 
   /**
    * Play a track with a given URL

@@ -4,7 +4,7 @@ import api from '../services/api.js';
 
 function useWebSocket() {
   const wsRef = useRef(null);
-  const { setCurrentTrack, setPlaying, setDjMessage, setQueue } = useAppStore();
+  const { setCurrentTrack, setPlaying, setDjMessage, setQueue, playTrack, playTTS } = useAppStore();
 
   useEffect(() => {
     let ws;
@@ -17,7 +17,15 @@ function useWebSocket() {
 
       // Handle now-playing events
       ws.on('now-playing', (data) => {
-        if (data.now_playing_track_id) {
+        if (data.url) {
+          // Full now-playing event with URL — play the track
+          playTrack(data.url, {
+            trackId: data.trackId,
+            trackName: data.trackName || 'Unknown',
+            artist: data.artist || 'Unknown',
+            albumArt: data.albumArt || null,
+          });
+        } else if (data.now_playing_track_id) {
           setCurrentTrack({
             trackId: data.now_playing_track_id,
             trackName: data.trackName || 'Unknown',
@@ -25,12 +33,17 @@ function useWebSocket() {
             albumArt: data.albumArt || null,
           });
         }
-        setPlaying(Boolean(data.is_playing));
+        if (data.is_playing !== undefined) {
+          setPlaying(Boolean(data.is_playing));
+        }
       });
 
-      // Handle DJ talk events
+      // Handle DJ talk events (with optional TTS audio)
       ws.on('dj-talk', (data) => {
         setDjMessage(data.text);
+        if (data.ttsUrl) {
+          playTTS(data.ttsUrl);
+        }
       });
 
       // Handle chat events

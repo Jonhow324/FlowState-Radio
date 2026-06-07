@@ -5,7 +5,7 @@ import useAppStore from '../stores/appStore.js';
 function ChatInput() {
   const [message, setMessage] = useState('');
   const [isSending, setIsSending] = useState(false);
-  const { playTrack, setDjMessage, refreshQueue } = useAppStore();
+  const { playTrack, playWithTTS, setDjMessage, refreshQueue } = useAppStore();
 
   const handleSend = async () => {
     if (!message.trim() || isSending) return;
@@ -26,23 +26,24 @@ function ChatInput() {
       // Handle now playing (AI recommended a song)
       if (data.nowPlaying?.url) {
         const np = data.nowPlaying;
-        playTrack(np.url, {
+        const trackInfo = {
           trackId: np.trackId,
           trackName: np.trackName,
           artist: np.artist,
           albumArt: np.albumArt,
-        });
+        };
+
+        // If TTS URL available, play DJ voice first then track
+        if (np.ttsUrl || data.ttsUrl) {
+          playWithTTS(np.ttsUrl || data.ttsUrl, np.url, trackInfo);
+        } else {
+          playTrack(np.url, trackInfo);
+        }
       }
 
       // Handle search results (add to queue)
       if (data.action === 'search') {
         refreshQueue();
-      }
-
-      // Handle player control
-      if (data.action === 'pause') {
-        const audio = document.querySelector('audio') || null;
-        // The audio is managed by the store, not DOM
       }
 
     } catch (error) {

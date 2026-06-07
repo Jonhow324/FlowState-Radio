@@ -6,11 +6,13 @@ const cache = require('../utils/cache');
 const logger = require('../utils/logger');
 
 const NCM_BASE = config.ncmApiUrl;
+const NCM_COOKIE = config.ncmCookie || '';
 
 // Axios instance with NCM-specific config
 const ncmClient = axios.create({
   baseURL: NCM_BASE,
   timeout: 15000,
+  headers: NCM_COOKIE ? { 'Cookie': NCM_COOKIE } : {},
 });
 
 // Log NCM API errors

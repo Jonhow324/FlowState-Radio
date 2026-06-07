@@ -7,6 +7,7 @@ const path = require('path');
 const config = require('./config');
 const logger = require('./utils/logger');
 const state = require('./state');
+const scheduler = require('./scheduler');
 
 async function startServer() {
   // Initialize database (async because sql.js loads WASM)
@@ -70,6 +71,7 @@ async function startServer() {
   app.use('/api/plan', require('./api/plan'));
   app.use('/api/player', require('./api/player'));
   app.use('/api/dj', require('./api/dj'));
+  app.use('/api/scheduler', require('./api/scheduler-api'));
 
   // Health check
   app.get('/api/health', (req, res) => {
@@ -98,6 +100,7 @@ async function startServer() {
   // ===== Graceful Shutdown =====
   process.on('SIGINT', () => {
     logger.info('SERVER', 'Shutting down...');
+    scheduler.stop();
     state.saveDbSync();
     server.close(() => {
       logger.info('SERVER', 'Server closed');
@@ -110,6 +113,10 @@ async function startServer() {
     logger.info('SERVER', `Claudio server running on http://localhost:${config.port}`);
     logger.info('SERVER', `WebSocket stream at ws://localhost:${config.port}/stream`);
     logger.info('SERVER', `Environment: ${config.nodeEnv}`);
+
+    // Start scheduler after server is ready
+    scheduler.setBroadcast(broadcast);
+    scheduler.start();
   });
 }
 

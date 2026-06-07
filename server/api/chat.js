@@ -10,6 +10,8 @@ const state = require('../state');
 const ncm = require('../services/ncm');
 const config = require('../config');
 const logger = require('../utils/logger');
+const tts = require('../tts');
+const scheduler = require('../scheduler');
 
 // Singleton brain instance
 const brain = new Brain(config);
@@ -47,6 +49,16 @@ router.post('/', async (req, res) => {
             is_playing: true,
           });
           const meta = state.getTrackMeta(next.track_id);
+
+          // Check queue level — auto-refill if < 3
+          const queueLen = state.getQueueLength();
+          if (queueLen < 3) {
+            logger.info('CHAT', `Queue low (${queueLen}), triggering auto-refill`);
+            scheduler.triggerRefill().catch((err) =>
+              logger.warn('CHAT', `Auto-refill failed: ${err.message}`)
+            );
+          }
+
           if (broadcast) {
             broadcast({
               type: 'now-playing',
@@ -226,9 +238,14 @@ router.post('/', async (req, res) => {
             };
 
             if (broadcast) {
-              // Push DJ talk first if AI has something to say
+              // Push DJ talk first if AI has something to say (with TTS)
               if (aiResult.say) {
-                broadcast({ type: 'dj-talk', data: { text: aiResult.say } });
+                const ttsResult = await tts.synthesize(aiResult.say);
+                broadcast({
+                  type: 'dj-talk',
+                  data: { text: aiResult.say, ttsUrl: ttsResult.url },
+                });
+                nowPlaying.ttsUrl = ttsResult.url;
               }
               broadcast({ type: 'now-playing', data: nowPlaying });
               broadcast({ type: 'queue-update', data: { queue: state.getQueue() } });
@@ -237,12 +254,17 @@ router.post('/', async (req, res) => {
         }
 
         // Log Claudio's response
+        let ttsUrl = null;
         if (aiResult.say) {
           state.logMessage('claudio', aiResult.say);
+          // Synthesize TTS (non-blocking for response, but include URL)
+          const ttsResult = await tts.synthesize(aiResult.say);
+          ttsUrl = ttsResult.url;
         }
 
         return res.json({
           say: aiResult.say,
+          ttsUrl,
           songs: aiResult.songs || [],
           resolvedTracks: resolvedTracks.map((t) => ({
             trackId: t.trackId,

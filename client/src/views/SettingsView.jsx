@@ -28,6 +28,7 @@ function SettingsView() {
   const [localVolume, setLocalVolume] = useState(Math.round(volume * 100));
   const [switching, setSwitching] = useState(false);
   const [selectedVoice, setSelectedVoice] = useState('default');
+  const [previewing, setPreviewing] = useState(null);
   const [ttsAvailable, setTtsAvailable] = useState(false);
   const [schedulerStatus, setSchedulerStatus] = useState(null);
 
@@ -40,10 +41,14 @@ function SettingsView() {
       if (res.data.activeDj) setActiveDj(res.data.activeDj);
     }).catch(console.error);
 
-    // Check TTS availability
+    // Check TTS availability and load current voice
     api.get('/api/scheduler/status').then((res) => {
       setTtsAvailable(res.data.ttsAvailable);
       setSchedulerStatus(res.data);
+    }).catch(console.error);
+
+    api.get('/api/tts/voice').then((res) => {
+      setSelectedVoice(res.data.current || 'default');
     }).catch(console.error);
   }, []);
 
@@ -70,9 +75,34 @@ function SettingsView() {
     api.post('/api/player/volume', { volume: localVolume / 100 }).catch(console.error);
   };
 
-  const handleVoiceChange = (voiceId) => {
+  const handleVoiceChange = async (voiceId) => {
+    if (selectedVoice === voiceId) return;
     setSelectedVoice(voiceId);
-    // TODO: persist voice preference to backend
+    try {
+      await api.post('/api/tts/voice', { voiceId });
+    } catch (err) {
+      console.error('Failed to change voice:', err);
+    }
+  };
+
+  const handleVoicePreview = async (voiceId) => {
+    if (previewing) return;
+    setPreviewing(voiceId);
+    try {
+      const res = await api.post('/api/tts/preview', { voiceId });
+      if (res.data.url) {
+        const audio = new Audio(res.data.url);
+        audio.play();
+        audio.onended = () => setPreviewing(null);
+        // Safety timeout
+        setTimeout(() => setPreviewing(null), 8000);
+      } else {
+        setPreviewing(null);
+      }
+    } catch (err) {
+      console.error('Voice preview failed:', err);
+      setPreviewing(null);
+    }
   };
 
   return (
@@ -166,25 +196,48 @@ function SettingsView() {
         {ttsAvailable ? (
           <div className="space-y-2">
             {VOICE_PRESETS.map((v) => (
-              <button
+              <div
                 key={v.id}
-                onClick={() => handleVoiceChange(v.id)}
-                className={`w-full flex items-center justify-between p-2.5 rounded-lg transition-all ${
+                className={`flex items-center justify-between p-2.5 rounded-lg transition-all ${
                   selectedVoice === v.id
                     ? 'bg-claudio-900/50 border border-claudio-500/50'
                     : 'bg-white/5 border border-transparent hover:bg-white/10'
                 }`}
               >
-                <div className="text-left">
+                <button
+                  onClick={() => handleVoiceChange(v.id)}
+                  className="flex-1 text-left"
+                >
                   <p className="text-sm text-white/80">{v.label}</p>
                   <p className="text-xs text-white/40">{v.desc}</p>
+                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => handleVoicePreview(v.id)}
+                    disabled={previewing === v.id}
+                    className={`p-1.5 rounded-full transition-all ${
+                      previewing === v.id ? 'text-green-400' : 'text-white/30 hover:text-claudio-400'
+                    }`}
+                    title="试听"
+                  >
+                    {previewing === v.id ? (
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" className="animate-pulse">
+                        <path d="M3 9v6h4l5 5V4L7 9H3z" />
+                      </svg>
+                    ) : (
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                        <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+                      </svg>
+                    )}
+                  </button>
+                  {selectedVoice === v.id && (
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" className="text-claudio-400">
+                      <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z" />
+                    </svg>
+                  )}
                 </div>
-                {selectedVoice === v.id && (
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" className="text-claudio-400">
-                    <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z" />
-                  </svg>
-                )}
-              </button>
+              </div>
             ))}
           </div>
         ) : (

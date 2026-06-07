@@ -18,8 +18,8 @@ const config = {
   // TTS (Minimax)
   minimaxApiKey: process.env.MINIMAX_API_KEY || '',
   minimaxGroupId: process.env.MINIMAX_GROUP_ID || '',
-  minimaxVoiceIdZh: process.env.MINIMAX_VOICE_ID_ZH || 'default',
-  minimaxVoiceIdEn: process.env.MINIMAX_VOICE_ID_EN || 'default',
+  minimaxVoiceIdZh: (process.env.MINIMAX_VOICE_ID_ZH && process.env.MINIMAX_VOICE_ID_ZH !== 'default') ? process.env.MINIMAX_VOICE_ID_ZH : '',
+  minimaxVoiceIdEn: (process.env.MINIMAX_VOICE_ID_EN && process.env.MINIMAX_VOICE_ID_EN !== 'default') ? process.env.MINIMAX_VOICE_ID_EN : '',
 
   // Weather (OpenWeather)
   openweatherApiKey: process.env.OPENWEATHER_API_KEY || '',

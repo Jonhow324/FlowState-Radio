@@ -8,16 +8,37 @@ const config = require('./config');
 const logger = require('./utils/logger');
 const state = require('./state');
 const scheduler = require('./scheduler');
+const tts = require('./tts');
 
 async function startServer() {
   // Initialize database (async because sql.js loads WASM)
   await state.initDatabase();
 
+  // Restore saved TTS voice preference
+  const savedVoice = state.getPref('tts_voice');
+  if (savedVoice) {
+    const VOICE_MAP = {
+      'default':          { zh: 'male-qn-qingse', en: 'male-qn-jingying' },
+      'male-qn-qingse':   { zh: 'male-qn-qingse', en: 'male-qn-jingying' },
+      'male-qn-jingying': { zh: 'male-qn-jingying', en: 'male-qn-jingying' },
+      'male-qn-badao':    { zh: 'male-qn-badao', en: 'male-qn-jingying' },
+      'female-shaonv':    { zh: 'female-shaonv', en: 'female-yujie' },
+      'female-yujie':     { zh: 'female-yujie', en: 'female-yujie' },
+      'female-tianmei':   { zh: 'female-tianmei', en: 'female-yujie' },
+    };
+    const mapping = VOICE_MAP[savedVoice];
+    if (mapping) {
+      tts.setVoice(mapping.zh, 'zh');
+      tts.setVoice(mapping.en, 'en');
+      logger.info('TTS', `Restored saved voice: ${savedVoice}`);
+    }
+  }
+
   const app = express();
   const server = http.createServer(app);
 
   // ===== Middleware =====
-  app.use(cors({ origin: ['http://localhost:5173', 'http://localhost:8000'] }));
+  app.use(cors({ origin: [/^http:\/\/localhost:\d+$/] }));
   app.use(express.json());
 
   // ===== WebSocket Setup =====
@@ -73,6 +94,7 @@ async function startServer() {
   app.use('/api/dj', require('./api/dj'));
   app.use('/api/scheduler', require('./api/scheduler-api'));
   app.use('/api/stats', require('./api/stats'));
+  app.use('/api/tts', require('./api/tts'));
 
   // Health check
   app.get('/api/health', (req, res) => {

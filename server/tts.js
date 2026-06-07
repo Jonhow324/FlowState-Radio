@@ -14,10 +14,31 @@ class TTSService {
   constructor() {
     this.apiKey = config.minimaxApiKey || '';
     this.groupId = config.minimaxGroupId || '';
-    this.voiceIdZh = config.minimaxVoiceIdZh || 'default';
-    this.voiceIdEn = config.minimaxVoiceIdEn || 'default';
+    this.voiceIdZh = config.minimaxVoiceIdZh || 'male-qn-qingse';
+    this.voiceIdEn = config.minimaxVoiceIdEn || 'male-qn-jingying';
     this.cacheDir = config.ttsCacheDir;
     this.ensureCacheDir();
+  }
+
+  /**
+   * Set voice at runtime (called from API when user switches voice)
+   * @param {string} voiceId - Minimax voice ID
+   * @param {string} [lang='zh'] - 'zh' or 'en'
+   */
+  setVoice(voiceId, lang = 'zh') {
+    if (lang === 'en') {
+      this.voiceIdEn = voiceId;
+    } else {
+      this.voiceIdZh = voiceId;
+    }
+    logger.info('TTS', `Voice changed (${lang}): ${voiceId}`);
+  }
+
+  /**
+   * Get current voice ID
+   */
+  getVoice(lang = 'zh') {
+    return lang === 'en' ? this.voiceIdEn : this.voiceIdZh;
   }
 
   ensureCacheDir() {
@@ -44,8 +65,9 @@ class TTSService {
       return { url: null, cached: false };
     }
 
-    // 1. Generate cache key (text hash)
-    const hash = crypto.createHash('md5').update(text + lang).digest('hex');
+    // 1. Generate cache key (text + lang + voice hash)
+    const voiceId = lang === 'en' ? this.voiceIdEn : this.voiceIdZh;
+    const hash = crypto.createHash('md5').update(text + lang + voiceId).digest('hex');
     const filename = `${hash}.mp3`;
     const cachePath = path.join(this.cacheDir, filename);
     const urlPath = `/tts/${filename}`;

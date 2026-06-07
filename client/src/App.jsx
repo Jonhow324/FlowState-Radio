@@ -6,6 +6,7 @@ import ProfileView from './views/ProfileView.jsx';
 import SettingsView from './views/SettingsView.jsx';
 import NowPlayingBar from './components/NowPlayingBar.jsx';
 import useMediaSession from './hooks/useMediaSession.js';
+import useWebSocket from './hooks/useWebSocket.js';
 
 const VIEWS = {
   player: PlayerView,
@@ -19,6 +20,9 @@ function App() {
 
   // Enable system media controls (lock screen, notification bar)
   useMediaSession();
+
+  // Connect WebSocket for real-time events (DJ talk, now-playing, queue updates)
+  useWebSocket();
 
   return (
     <div className="min-h-screen flex flex-col max-w-lg mx-auto relative">

@@ -9,6 +9,67 @@ audio.preload = 'auto';
 const ttsAudio = new Audio();
 ttsAudio.preload = 'auto';
 
+// ===== Ducking Engine =====
+// When DJ speaks, music ducks (lowers volume); fades back up when DJ finishes
+const DUCK_LEVEL = 0.15;    // Music volume multiplier while DJ speaks (15%)
+const FADE_MS = 600;        // Fade transition duration in ms
+const FADE_STEP = 30;       // Volume update interval in ms
+
+let _duckTimer = null;        // Active fade timer
+let _ducking = false;         // Whether music is currently ducked
+let _savedVolume = 0.5;       // User's volume before ducking
+
+/**
+ * Smoothly fade music volume down to duck level.
+ * Called when DJ starts speaking.
+ */
+function _duckDown() {
+  const vol = audio.volume || 0.5;
+  _savedVolume = vol;
+  _ducking = true;
+  const target = vol * DUCK_LEVEL;
+  const steps = Math.max(1, Math.round(FADE_MS / FADE_STEP));
+  const delta = (vol - target) / steps;
+
+  if (_duckTimer) clearInterval(_duckTimer);
+  let step = 0;
+  _duckTimer = setInterval(() => {
+    step++;
+    if (step >= steps) {
+      audio.volume = target;
+      clearInterval(_duckTimer);
+      _duckTimer = null;
+    } else {
+      audio.volume = Math.max(target, vol - delta * step);
+    }
+  }, FADE_STEP);
+}
+
+/**
+ * Smoothly fade music volume back up to normal.
+ * Called when DJ finishes speaking.
+ */
+function _fadeMusicUp() {
+  if (_duckTimer) clearInterval(_duckTimer);
+  const target = _savedVolume;
+  const current = audio.volume;
+  const steps = Math.max(1, Math.round(FADE_MS / FADE_STEP));
+  const delta = (target - current) / steps;
+
+  let step = 0;
+  _duckTimer = setInterval(() => {
+    step++;
+    if (step >= steps) {
+      audio.volume = target;
+      clearInterval(_duckTimer);
+      _duckTimer = null;
+      _ducking = false;
+    } else {
+      audio.volume = Math.min(target, current + delta * step);
+    }
+  }, FADE_STEP);
+}
+
 const useAppStore = create((set, get) => ({
   // Current track info
   currentTrack: null,
@@ -21,6 +82,7 @@ const useAppStore = create((set, get) => ({
   activeDj: 'zh',
   djMessage: null,
   isSpeaking: false, // Whether TTS is currently playing
+  isDucking: false,  // Whether music is currently ducked for DJ voice
 
   // Queue
   queue: [],
@@ -52,16 +114,20 @@ const useAppStore = create((set, get) => ({
       set({ isPlaying: false });
     });
 
-    // TTS audio events
-    ttsAudio.addEventListener('play', () => set({ isSpeaking: true }));
+    // TTS audio events — ducking-based radio effect
+    ttsAudio.addEventListener('play', () => {
+      set({ isSpeaking: true });
+    });
     ttsAudio.addEventListener('ended', () => {
       set({ isSpeaking: false });
-      // Resume music after TTS finishes
-      if (audio.src && get().isPlaying) {
-        audio.play().catch(console.error);
-      }
+      // Fade music back up when DJ finishes speaking
+      _fadeMusicUp();
     });
-    ttsAudio.addEventListener('error', () => set({ isSpeaking: false }));
+    ttsAudio.addEventListener('error', () => {
+      set({ isSpeaking: false });
+      // Restore music if TTS fails
+      if (_ducking) _fadeMusicUp();
+    });
 
     set({ _audioInitialized: true });
   },
@@ -69,17 +135,19 @@ const useAppStore = create((set, get) => ({
   // ===== Player actions =====
 
   /**
-   * Play TTS audio (DJ voice)
+   * Play TTS audio (DJ voice) with ducking effect
+   * Music continues playing at reduced volume while DJ speaks
    * @param {string} ttsUrl - URL to the TTS mp3 file
    */
   playTTS: (ttsUrl) => {
     if (!ttsUrl) return;
     get().initAudio();
 
-    // Pause music while TTS plays
-    const wasPlaying = audio.src && !audio.paused;
-    if (wasPlaying) {
-      audio.pause();
+    const musicIsPlaying = audio.src && !audio.paused;
+
+    // Duck music volume if music is currently playing
+    if (musicIsPlaying) {
+      _duckDown();
     }
 
     ttsAudio.src = ttsUrl;
@@ -87,35 +155,44 @@ const useAppStore = create((set, get) => ({
     ttsAudio.play().catch((err) => {
       console.warn('[TTS] Play failed:', err);
       set({ isSpeaking: false });
-      // Resume music if TTS fails
-      if (wasPlaying) audio.play().catch(console.error);
+      // Fade music back up if TTS fails
+      if (musicIsPlaying && _ducking) _fadeMusicUp();
     });
     set({ isSpeaking: true });
   },
 
   /**
-   * Play DJ talk + song: first TTS, then the track
+   * Play DJ talk + song with ducking radio effect:
+   * 1. Start the new track at ducked volume
+   * 2. Play TTS voice over the ducked music
+   * 3. When TTS ends, music gradually fades up to full volume
    * @param {string} ttsUrl - TTS audio URL (can be null)
    * @param {string} trackUrl - Song audio URL
    * @param {object} trackInfo - Track metadata
    */
   playWithTTS: (ttsUrl, trackUrl, trackInfo) => {
     if (ttsUrl) {
-      // Set up the track to play after TTS
       get().initAudio();
-      audio.src = trackUrl;
-      audio.volume = get().volume;
-      set({ currentTrack: trackInfo, progress: 0 });
 
-      // Play TTS first; the 'ended' event will resume audio
+      // Start the new track at ducked volume under the DJ voice
+      const vol = get().volume;
+      _savedVolume = vol;
+      audio.src = trackUrl;
+      audio.volume = vol * DUCK_LEVEL;
+      audio.play().catch(console.error);
+
+      set({ currentTrack: trackInfo, progress: 0, isPlaying: true });
+
+      // Play TTS voice — when it ends, the 'ended' listener calls _fadeMusicUp
       ttsAudio.src = ttsUrl;
-      ttsAudio.volume = get().volume;
+      ttsAudio.volume = vol;
       ttsAudio.play().catch((err) => {
-        console.warn('[TTS] Play failed, playing track directly:', err);
-        audio.play().catch(console.error);
-        set({ isPlaying: true, isSpeaking: false });
+        console.warn('[TTS] Play failed, fading music up:', err);
+        audio.volume = vol;
+        set({ isSpeaking: false });
       });
-      set({ isSpeaking: true, isPlaying: true });
+      _ducking = true;
+      set({ isSpeaking: true, isDucking: true });
     } else {
       // No TTS, play track directly
       get().playTrack(trackUrl, trackInfo);
@@ -146,6 +223,13 @@ const useAppStore = create((set, get) => ({
 
     if (isPlaying) {
       audio.pause();
+      // If ducked, also restore volume so it's correct when user resumes
+      if (_ducking) {
+        if (_duckTimer) clearInterval(_duckTimer);
+        _ducking = false;
+        audio.volume = _savedVolume;
+        set({ isDucking: false });
+      }
       api.post('/api/player/pause').catch(console.error);
     } else if (audio.src) {
       audio.play().catch(console.error);
@@ -167,6 +251,18 @@ const useAppStore = create((set, get) => ({
   },
 
   skipNext: async () => {
+    // Clean up ducking state on skip
+    if (_ducking) {
+      if (_duckTimer) clearInterval(_duckTimer);
+      _ducking = false;
+      audio.volume = _savedVolume;
+    }
+    // Stop any playing TTS
+    if (!ttsAudio.paused) {
+      ttsAudio.pause();
+      ttsAudio.src = '';
+      set({ isSpeaking: false, isDucking: false });
+    }
     try {
       const res = await api.post('/api/player/skip');
       if (res.data.nowPlaying?.url) {
@@ -195,7 +291,14 @@ const useAppStore = create((set, get) => ({
 
   setVolume: (vol) => {
     get().initAudio();
-    audio.volume = vol;
+    // If currently ducked, keep music at ducked level relative to new volume
+    if (_ducking) {
+      _savedVolume = vol;
+      audio.volume = vol * DUCK_LEVEL;
+    } else {
+      audio.volume = vol;
+    }
+    ttsAudio.volume = vol;
     set({ volume: vol });
     api.post('/api/player/volume', { volume: vol }).catch(console.error);
   },

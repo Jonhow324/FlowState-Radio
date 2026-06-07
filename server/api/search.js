@@ -18,12 +18,15 @@ router.get('/', async (req, res) => {
   }
 
   try {
+    if (!ncm.isHealthy()) {
+      return res.status(503).json({ error: '音乐搜索服务暂时不可用', code: 'NCM_UNAVAILABLE', results: [] });
+    }
     const results = await ncm.search(keyword, limit);
     logger.info('SEARCH', `"${keyword}" → ${results.length} results`);
     res.json({ keyword, results, total: results.length });
   } catch (error) {
     logger.error('SEARCH', `Search failed: ${error.message}`);
-    res.status(502).json({ error: 'NCM API search failed', detail: error.message });
+    res.status(502).json({ error: '搜索失败，请稍后再试', code: 'SEARCH_FAILED', results: [] });
   }
 });
 

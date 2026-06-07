@@ -336,10 +336,51 @@ function shiftQueue() {
   return first || null;
 }
 
-// ===== Track Metadata =====
+/**
+ * Put a track back at the front of the queue (used when skip fails)
+ */
+function prependToQueue(track) {
+  mutate('UPDATE play_queue SET position = position + 1');
+  mutate(
+    'INSERT INTO play_queue (track_id, track_name, artist, position, source, ai_reason) VALUES (?, ?, ?, 0, ?, ?)',
+    [track.track_id, track.track_name || null, track.artist || null, track.source || 'restored', null]
+  );
+}
+
+// ===== Track Metadata (with in-memory cache) =====
+
+const META_CACHE_TTL = 10 * 60 * 1000; // 10 minutes
+const META_CACHE_MAX = 200;
+const _metaCache = new Map();
+
+function _cacheSet(trackId, data) {
+  if (_metaCache.size >= META_CACHE_MAX) {
+    // Evict oldest entry
+    const oldest = _metaCache.keys().next().value;
+    _metaCache.delete(oldest);
+  }
+  _metaCache.set(trackId, { data, expires: Date.now() + META_CACHE_TTL });
+}
+
+function _cacheGet(trackId) {
+  const entry = _metaCache.get(trackId);
+  if (!entry) return undefined;
+  if (Date.now() > entry.expires) {
+    _metaCache.delete(trackId);
+    return undefined;
+  }
+  // Move to end (most recently used)
+  _metaCache.delete(trackId);
+  _metaCache.set(trackId, entry);
+  return entry.data;
+}
 
 function getTrackMeta(trackId) {
-  return queryOne('SELECT * FROM track_metadata WHERE track_id = ?', [trackId]);
+  const cached = _cacheGet(trackId);
+  if (cached !== undefined) return cached;
+  const row = queryOne('SELECT * FROM track_metadata WHERE track_id = ?', [trackId]);
+  if (row) _cacheSet(trackId, row);
+  return row;
 }
 
 function setTrackMeta(trackId, meta) {
@@ -358,6 +399,15 @@ function setTrackMeta(trackId, meta) {
     meta.description || null,
     meta.segueText || null,
   ]);
+  // Update cache with the data we just wrote
+  _cacheSet(trackId, {
+    track_id: trackId,
+    track_name: meta.trackName || null,
+    artist: meta.artist || null,
+    album: meta.album || null,
+    album_art: meta.albumArt || null,
+    duration: meta.duration || null,
+  });
 }
 
 function setTrackDescription(trackId, description) {
@@ -448,6 +498,7 @@ module.exports = {
   clearQueue,
   getQueueLength,
   shiftQueue,
+  prependToQueue,
   getTrackMeta,
   setTrackMeta,
   setTrackDescription,

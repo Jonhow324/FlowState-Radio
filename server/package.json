@@ -19,6 +19,7 @@
     "ws": "^8.18.0"
   },
   "devDependencies": {
+    "nock": "^14.0.15",
     "nodemon": "^3.1.0",
     "vitest": "^2.0.0"
   }

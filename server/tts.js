@@ -160,6 +160,32 @@ class TTSService {
   }
 
   /**
+   * Pre-warm common DJ phrases in the background (non-blocking)
+   * Called at server startup to ensure instant playback for frequent phrases
+   */
+  preWarm(phrases) {
+    if (!this.isAvailable() || !phrases || phrases.length === 0) return;
+    const count = phrases.length;
+    logger.info('TTS', `Pre-warming ${count} common phrases...`);
+
+    // Fire-and-forget: don't block server startup
+    (async () => {
+      let hits = 0;
+      let synthesized = 0;
+      for (const { text, lang } of phrases) {
+        try {
+          const result = await this.synthesize(text, lang || 'zh');
+          if (result.cached) hits++;
+          else if (result.url) synthesized++;
+        } catch {
+          // ignore individual failures
+        }
+      }
+      logger.info('TTS', `Pre-warm done: ${hits} cached, ${synthesized} newly synthesized (of ${count})`);
+    })();
+  }
+
+  /**
    * Get cache stats
    */
   getCacheStats() {

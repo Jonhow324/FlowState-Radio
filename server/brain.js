@@ -14,11 +14,16 @@ class Brain {
 
   /**
    * Check and cache DeepSeek availability
+   * Refreshes cached state if circuit breaker has reset
    */
   async isDeepSeekAvailable() {
     if (this._deepseekAvailable === null) {
       this._deepseekAvailable = await this.deepseek.isAvailable();
       logger.info('BRAIN', `DeepSeek API available: ${this._deepseekAvailable}`);
+    }
+    // If circuit is open, skip DeepSeek even if configured
+    if (this._deepseekAvailable && this.deepseek.isCircuitOpen()) {
+      return false;
     }
     return this._deepseekAvailable;
   }

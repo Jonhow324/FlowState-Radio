@@ -19,6 +19,9 @@ router.get('/url', async (req, res) => {
   }
 
   try {
+    if (!ncm.isHealthy()) {
+      return res.status(503).json({ error: '音乐服务暂时不可用', code: 'NCM_UNAVAILABLE' });
+    }
     const url = await ncm.getSongUrl(trackId);
     if (!url) {
       return res.status(404).json({ error: 'Song URL not available (may be VIP-only or region-locked)' });
@@ -26,7 +29,7 @@ router.get('/url', async (req, res) => {
     res.json({ trackId, url });
   } catch (error) {
     logger.error('SONG', `Failed to get URL for ${trackId}: ${error.message}`);
-    res.status(502).json({ error: 'Failed to get song URL' });
+    res.status(502).json({ error: '获取播放链接失败', code: 'URL_FETCH_FAILED' });
   }
 });
 
@@ -114,7 +117,7 @@ router.post('/add', async (req, res) => {
     });
   } catch (error) {
     logger.error('SONG', `Failed to add tracks: ${error.message}`);
-    res.status(500).json({ error: 'Failed to add tracks', detail: error.message });
+    res.status(502).json({ error: '添加歌曲失败，音乐服务可能暂时不可用', code: 'ADD_FAILED' });
   }
 });
 

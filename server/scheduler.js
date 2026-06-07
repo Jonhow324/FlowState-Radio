@@ -214,24 +214,30 @@ class Scheduler {
       if (resolvedTracks.length > 0) {
         const first = state.shiftQueue();
         if (first) {
-          const url = await ncm.getSongUrl(first.track_id);
-          state.updateCurrentState({
-            now_playing_track_id: first.track_id,
-            now_playing_started: new Date().toISOString(),
-            is_playing: true,
-          });
-          state.logPlay(first.track_id, first.track_name, first.artist, 'scheduler-morning', 'Morning briefing');
+          try {
+            const url = await ncm.getSongUrl(first.track_id);
+            state.updateCurrentState({
+              now_playing_track_id: first.track_id,
+              now_playing_started: new Date().toISOString(),
+              is_playing: true,
+            });
+            state.logPlay(first.track_id, first.track_name, first.artist, 'scheduler-morning', 'Morning briefing');
 
-          this.broadcast({
-            type: 'now-playing',
-            data: {
-              trackId: first.track_id,
-              trackName: first.track_name,
-              artist: first.artist,
-              albumArt: state.getTrackMeta(first.track_id)?.album_art || null,
-              url,
-            },
-          });
+            this.broadcast({
+              type: 'now-playing',
+              data: {
+                trackId: first.track_id,
+                trackName: first.track_name,
+                artist: first.artist,
+                albumArt: state.getTrackMeta(first.track_id)?.album_art || null,
+                url,
+              },
+            });
+          } catch (err) {
+            logger.warn('SCHEDULER', `Morning briefing: cannot get URL for ${first.track_id}: ${err.message}`);
+            // Put it back so it can be retried later
+            state.prependToQueue(first);
+          }
         }
 
         this.broadcast({

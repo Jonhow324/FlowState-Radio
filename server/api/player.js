@@ -23,6 +23,9 @@ router.post('/play', async (req, res) => {
   try {
     if (trackId) {
       // Play specific track — fetch URL from NCM
+      if (!ncm.isHealthy()) {
+        return res.status(503).json({ error: '音乐服务暂时不可用', code: 'NCM_UNAVAILABLE' });
+      }
       const [url, details] = await Promise.all([
         ncm.getSongUrl(trackId),
         ncm.getSongDetail([trackId]),
@@ -66,7 +69,12 @@ router.post('/play', async (req, res) => {
     const current = state.getCurrentState();
     if (current.now_playing_track_id && !current.is_playing) {
       // Resume — need to get URL again (may have expired from cache)
-      const url = await ncm.getSongUrl(current.now_playing_track_id);
+      let url = null;
+      try {
+        url = await ncm.getSongUrl(current.now_playing_track_id);
+      } catch (err) {
+        logger.warn('PLAYER', `Resume: cannot get URL for ${current.now_playing_track_id}: ${err.message}`);
+      }
       state.updateCurrentState({ is_playing: true });
 
       if (broadcast) {
@@ -79,7 +87,13 @@ router.post('/play', async (req, res) => {
     // Play next from queue
     const next = state.shiftQueue();
     if (next) {
-      const url = await ncm.getSongUrl(next.track_id);
+      let url;
+      try {
+        url = await ncm.getSongUrl(next.track_id);
+      } catch (err) {
+        logger.warn('PLAYER', `Queue-next: cannot get URL for ${next.track_id}: ${err.message}`);
+        return res.status(502).json({ error: 'Failed to fetch play URL', trackId: next.track_id });
+      }
       state.updateCurrentState({
         now_playing_track_id: next.track_id,
         now_playing_started: new Date().toISOString(),
@@ -111,7 +125,7 @@ router.post('/play', async (req, res) => {
     return res.json({ success: false, reason: 'Queue is empty' });
   } catch (error) {
     logger.error('PLAYER', `Play error: ${error.message}`);
-    res.status(500).json({ error: 'Play failed', detail: error.message });
+    res.status(500).json({ error: 'Play failed', code: 'PLAY_ERROR' });
   }
 });
 
@@ -141,7 +155,15 @@ router.post('/skip', async (req, res) => {
     const next = state.shiftQueue();
 
     if (next) {
-      const url = await ncm.getSongUrl(next.track_id);
+      let url;
+      try {
+        url = await ncm.getSongUrl(next.track_id);
+      } catch (err) {
+        logger.warn('PLAYER', `Skip: cannot get URL for ${next.track_id}: ${err.message}`);
+        // Put it back in the queue front
+        state.prependToQueue(next);
+        return res.status(502).json({ error: '音乐服务暂时不可用，跳过失败', code: 'NCM_UNAVAILABLE' });
+      }
       state.updateCurrentState({
         now_playing_track_id: next.track_id,
         now_playing_started: new Date().toISOString(),
@@ -178,7 +200,7 @@ router.post('/skip', async (req, res) => {
     return res.json({ success: true, nowPlaying: null });
   } catch (error) {
     logger.error('PLAYER', `Skip error: ${error.message}`);
-    res.status(500).json({ error: 'Skip failed' });
+    res.status(500).json({ error: 'Skip failed', code: 'SKIP_ERROR' });
   }
 });
 

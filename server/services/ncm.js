@@ -15,10 +15,14 @@ const ncmClient = axios.create({
   headers: NCM_COOKIE ? { 'Cookie': NCM_COOKIE } : {},
 });
 
-// Log NCM API errors
+// Log NCM API errors and track health
 ncmClient.interceptors.response.use(
-  (res) => res,
+  (res) => {
+    recordSuccess();
+    return res;
+  },
   (err) => {
+    recordFail();
     logger.error('NCM', `API error: ${err.message}`, {
       url: err.config?.url,
       status: err.response?.status,
@@ -190,6 +194,38 @@ async function getRecommend() {
   }
 }
 
+// ── Health check ──────────────────────────────────────────────
+let _lastFailAt = 0;
+let _consecutiveFails = 0;
+const NCM_FAIL_THRESHOLD = 5;   // Mark unhealthy after 5 consecutive failures
+const NCM_RECOVER_WINDOW = 30000; // Re-check after 30s
+
+function recordFail() {
+  _consecutiveFails++;
+  _lastFailAt = Date.now();
+  if (_consecutiveFails >= NCM_FAIL_THRESHOLD) {
+    logger.warn('NCM', `Service unhealthy (${_consecutiveFails} consecutive failures)`);
+  }
+}
+
+function recordSuccess() {
+  _consecutiveFails = 0;
+}
+
+/**
+ * Returns true if NCM appears healthy (no recent streak of failures)
+ */
+function isHealthy() {
+  if (_consecutiveFails < NCM_FAIL_THRESHOLD) return true;
+  // Allow retry after cooldown window
+  if (Date.now() - _lastFailAt > NCM_RECOVER_WINDOW) {
+    logger.info('NCM', 'Health check: cooldown elapsed, allowing retry');
+    _consecutiveFails = 0;
+    return true;
+  }
+  return false;
+}
+
 module.exports = {
   search,
   getSongUrl,
@@ -198,4 +234,7 @@ module.exports = {
   getPlaylistDetail,
   getTracksFromPlaylist,
   getRecommend,
+  recordFail,
+  recordSuccess,
+  isHealthy,
 };

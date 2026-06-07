@@ -40,6 +40,25 @@ async function startServer() {
   // ===== Middleware =====
   app.use(cors({ origin: [/^http:\/\/localhost:\d+$/] }));
   app.use(express.json());
+  app.use(logger.requestMiddleware);
+
+  // Request duration logging
+  app.use((req, res, next) => {
+    if (!req.path.startsWith('/api/') || req.path.includes('/health')) return next();
+    const start = Date.now();
+    const method = req.method;
+    const url = req.originalUrl || req.url;
+    let logged = false;
+    const onDone = () => {
+      if (logged) return;
+      logged = true;
+      const duration = Date.now() - start;
+      logger.info('HTTP', `${method} ${url} → ${res.statusCode} (${duration}ms)`);
+    };
+    res.once('finish', onDone);
+    res.once('close', onDone);
+    next();
+  });
 
   // ===== WebSocket Setup =====
   const WebSocket = require('ws');
@@ -140,6 +159,18 @@ async function startServer() {
     // Start scheduler after server is ready
     scheduler.setBroadcast(broadcast);
     scheduler.start();
+
+    // Pre-warm TTS cache with common DJ phrases (non-blocking)
+    tts.preWarm([
+      { text: '早安！新的一天开始了，让音乐陪你出发。', lang: 'zh' },
+      { text: '好的，来一首歌给你。', lang: 'zh' },
+      { text: '这首歌送给你，希望你喜欢。', lang: 'zh' },
+      { text: '接下来换一首节奏感更强的。', lang: 'zh' },
+      { text: '夜深了，来一首安静的歌陪你入眠。', lang: 'zh' },
+      { text: '好，暂停了。', lang: 'zh' },
+      { text: '队列里没有歌了。', lang: 'zh' },
+      { text: '嗯，出了一点小状况，稍后再试试吧。', lang: 'zh' },
+    ]);
   });
 }
 

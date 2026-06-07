@@ -16,6 +16,33 @@ const scheduler = require('../scheduler');
 // Singleton brain instance
 const brain = new Brain(config);
 
+// ── Helper: safe NCM wrappers ────────────────────────────────
+async function safeSearch(keyword, limit) {
+  if (!ncm.isHealthy()) {
+    logger.warn('CHAT', `NCM unhealthy, skipping search: "${keyword}"`);
+    return null;
+  }
+  try {
+    return await ncm.search(keyword, limit);
+  } catch (err) {
+    logger.warn('CHAT', `NCM search failed for "${keyword}": ${err.message}`);
+    return null;
+  }
+}
+
+async function safeGetSongUrl(trackId) {
+  if (!ncm.isHealthy()) {
+    logger.warn('CHAT', 'NCM unhealthy, cannot get song URL');
+    return null;
+  }
+  try {
+    return await ncm.getSongUrl(trackId);
+  } catch (err) {
+    logger.warn('CHAT', `NCM getSongUrl failed for ${trackId}: ${err.message}`);
+    return null;
+  }
+}
+
 router.post('/', async (req, res) => {
   const { message } = req.body;
   if (!message || typeof message !== 'string') {
@@ -42,7 +69,50 @@ router.post('/', async (req, res) => {
       case 'skip': {
         const next = state.shiftQueue();
         if (next) {
-          const url = await ncm.getSongUrl(next.track_id);
+          const url = await safeGetSongUrl(next.track_id);
+          if (!url) {
+            // Try to skip to the next one in queue instead
+            logger.warn('CHAT', `Cannot get URL for ${next.track_id}, trying next in queue`);
+            const fallback = state.shiftQueue();
+            if (fallback) {
+              const fallbackUrl = await safeGetSongUrl(fallback.track_id);
+              if (fallbackUrl) {
+                state.updateCurrentState({
+                  now_playing_track_id: fallback.track_id,
+                  now_playing_started: new Date().toISOString(),
+                  is_playing: true,
+                });
+                const meta = state.getTrackMeta(fallback.track_id);
+                if (broadcast) {
+                  broadcast({
+                    type: 'now-playing',
+                    data: {
+                      trackId: fallback.track_id,
+                      trackName: meta?.track_name || fallback.track_name,
+                      artist: meta?.artist || fallback.artist,
+                      albumArt: meta?.album_art || null,
+                      url: fallbackUrl,
+                    },
+                  });
+                }
+                return res.json({
+                  say: null,
+                  play: [fallback.track_id],
+                  reason: 'Skipped (fallback)',
+                  action: 'skip',
+                  nowPlaying: { trackId: fallback.track_id, url: fallbackUrl, trackName: meta?.track_name || fallback.track_name },
+                });
+              }
+            }
+            // All fallback exhausted
+            return res.json({
+              say: '抱歉，音乐服务暂时不可用，请稍后再试。',
+              play: [],
+              reason: 'NCM unavailable',
+              action: 'skip',
+            });
+          }
+
           state.updateCurrentState({
             now_playing_track_id: next.track_id,
             now_playing_started: new Date().toISOString(),
@@ -83,7 +153,16 @@ router.post('/', async (req, res) => {
       }
 
       case 'search': {
-        const results = await ncm.search(params.keyword, 5);
+        const results = await safeSearch(params.keyword, 5);
+        if (!results) {
+          return res.json({
+            say: '音乐搜索服务暂时不可用，请稍后再试。',
+            play: [],
+            reason: 'NCM search unavailable',
+            action: 'search',
+            searchResults: [],
+          });
+        }
         const trackIds = results.map((r) => r.trackId);
         if (trackIds.length > 0) {
           // Add to queue
@@ -116,11 +195,27 @@ router.post('/', async (req, res) => {
       case 'play': {
         // If a song name is provided, search and play
         if (params.songName) {
-          const results = await ncm.search(params.songName, 1);
+          const results = await safeSearch(params.songName, 1);
+          if (!results) {
+            return res.json({
+              say: '音乐服务暂时不可用，没法帮你找到这首歌，请稍后再试。',
+              play: [],
+              reason: 'NCM unavailable',
+              action: 'play',
+            });
+          }
           if (results.length > 0) {
             const track = results[0];
             state.setTrackMeta(track.trackId, track);
-            const url = await ncm.getSongUrl(track.trackId);
+            const url = await safeGetSongUrl(track.trackId);
+            if (!url) {
+              return res.json({
+                say: `找到了${track.artist}的${track.trackName}，但暂时无法获取播放链接。`,
+                play: [],
+                reason: 'NCM URL unavailable',
+                action: 'play',
+              });
+            }
             state.updateCurrentState({
               now_playing_track_id: track.trackId,
               now_playing_started: new Date().toISOString(),
@@ -151,7 +246,15 @@ router.post('/', async (req, res) => {
         // No song name or not found — resume
         const current = state.getCurrentState();
         if (current.now_playing_track_id) {
-          const url = await ncm.getSongUrl(current.now_playing_track_id);
+          const url = await safeGetSongUrl(current.now_playing_track_id);
+          if (!url) {
+            return res.json({
+              say: '音乐服务暂时不可用，无法恢复播放。',
+              play: [],
+              reason: 'NCM URL unavailable',
+              action: 'resume',
+            });
+          }
           state.updateCurrentState({ is_playing: true });
           if (broadcast) broadcast({ type: 'player-control', data: { action: 'play', url } });
           return res.json({ say: null, play: [], reason: 'Resume', action: 'resume' });
@@ -174,32 +277,43 @@ router.post('/', async (req, res) => {
 
         // Resolve AI recommendations to real NCM tracks
         let resolvedTracks = [];
+        const ncmAvailable = ncm.isHealthy();
 
         if (aiResult.songs && aiResult.songs.length > 0) {
-          // New format: [{name, artist}] — search NCM for each
-          for (const song of aiResult.songs) {
-            try {
-              const keyword = `${song.name} ${song.artist}`.trim();
-              const results = await ncm.search(keyword, 1);
-              if (results.length > 0) {
-                resolvedTracks.push(results[0]);
-              } else {
-                // Retry with just song name
-                const retryResults = await ncm.search(song.name, 1);
-                if (retryResults.length > 0) {
-                  resolvedTracks.push(retryResults[0]);
+          if (!ncmAvailable) {
+            logger.warn('CHAT', 'NCM unhealthy — skipping song resolution, returning DJ text only');
+          } else {
+            // New format: [{name, artist}] — search NCM for each
+            for (const song of aiResult.songs) {
+              try {
+                const keyword = `${song.name} ${song.artist}`.trim();
+                const results = await ncm.search(keyword, 1);
+                if (results.length > 0) {
+                  resolvedTracks.push(results[0]);
                 } else {
-                  logger.warn('CHAT', `Song not found on NCM: ${song.name} - ${song.artist}`);
+                  // Retry with just song name
+                  const retryResults = await ncm.search(song.name, 1);
+                  if (retryResults.length > 0) {
+                    resolvedTracks.push(retryResults[0]);
+                  } else {
+                    logger.warn('CHAT', `Song not found on NCM: ${song.name} - ${song.artist}`);
+                  }
                 }
+              } catch (err) {
+                logger.warn('CHAT', `NCM search failed for "${song.name}": ${err.message}`);
               }
-            } catch (err) {
-              logger.warn('CHAT', `NCM search failed for "${song.name}": ${err.message}`);
             }
           }
         } else if (aiResult.play && aiResult.play.length > 0) {
           // Old format: [trackIds] — from rule engine
-          const details = await ncm.getSongDetail(aiResult.play);
-          resolvedTracks = details;
+          if (ncmAvailable) {
+            try {
+              const details = await ncm.getSongDetail(aiResult.play);
+              resolvedTracks = details;
+            } catch (err) {
+              logger.warn('CHAT', `NCM getSongDetail failed: ${err.message}`);
+            }
+          }
         }
 
         let nowPlaying = null;
@@ -220,35 +334,48 @@ router.post('/', async (req, res) => {
           // Play the first one immediately
           const first = state.shiftQueue();
           if (first) {
-            const url = await ncm.getSongUrl(first.track_id);
-            state.updateCurrentState({
-              now_playing_track_id: first.track_id,
-              now_playing_started: new Date().toISOString(),
-              is_playing: true,
-            });
-            state.logPlay(first.track_id, first.track_name, first.artist, aiResult.source, aiResult.reason);
+            const url = await safeGetSongUrl(first.track_id);
+            if (!url) {
+              logger.warn('CHAT', `Cannot play first track ${first.track_id}, NCM URL failed`);
+              // Still return the DJ text, just skip playback
+            } else {
+              state.updateCurrentState({
+                now_playing_track_id: first.track_id,
+                now_playing_started: new Date().toISOString(),
+                is_playing: true,
+              });
+              state.logPlay(first.track_id, first.track_name, first.artist, aiResult.source, aiResult.reason);
 
-            const meta = state.getTrackMeta(first.track_id);
-            nowPlaying = {
-              trackId: first.track_id,
-              trackName: meta?.track_name || first.track_name,
-              artist: meta?.artist || first.artist,
-              albumArt: meta?.album_art || null,
-              url,
-            };
+              const meta = state.getTrackMeta(first.track_id);
+              nowPlaying = {
+                trackId: first.track_id,
+                trackName: meta?.track_name || first.track_name,
+                artist: meta?.artist || first.artist,
+                albumArt: meta?.album_art || null,
+                url,
+              };
 
-            if (broadcast) {
-              // Push DJ talk first if AI has something to say (with TTS)
-              if (aiResult.say) {
-                const ttsResult = await tts.synthesize(aiResult.say);
-                broadcast({
-                  type: 'dj-talk',
-                  data: { text: aiResult.say, ttsUrl: ttsResult.url },
-                });
-                nowPlaying.ttsUrl = ttsResult.url;
+              if (broadcast) {
+                // Push DJ talk first if AI has something to say (with TTS)
+                if (aiResult.say) {
+                  try {
+                    const ttsResult = await tts.synthesize(aiResult.say);
+                    broadcast({
+                      type: 'dj-talk',
+                      data: { text: aiResult.say, ttsUrl: ttsResult.url },
+                    });
+                    nowPlaying.ttsUrl = ttsResult.url;
+                  } catch (ttsErr) {
+                    logger.warn('CHAT', `TTS synthesis failed: ${ttsErr.message}`);
+                    broadcast({
+                      type: 'dj-talk',
+                      data: { text: aiResult.say, ttsUrl: null },
+                    });
+                  }
+                }
+                broadcast({ type: 'now-playing', data: nowPlaying });
+                broadcast({ type: 'queue-update', data: { queue: state.getQueue() } });
               }
-              broadcast({ type: 'now-playing', data: nowPlaying });
-              broadcast({ type: 'queue-update', data: { queue: state.getQueue() } });
             }
           }
         }
@@ -258,8 +385,12 @@ router.post('/', async (req, res) => {
         if (aiResult.say) {
           state.logMessage('claudio', aiResult.say);
           // Synthesize TTS (non-blocking for response, but include URL)
-          const ttsResult = await tts.synthesize(aiResult.say);
-          ttsUrl = ttsResult.url;
+          try {
+            const ttsResult = await tts.synthesize(aiResult.say);
+            ttsUrl = ttsResult.url;
+          } catch (ttsErr) {
+            logger.warn('CHAT', `TTS synthesis failed: ${ttsErr.message}`);
+          }
         }
 
         return res.json({
@@ -279,10 +410,13 @@ router.post('/', async (req, res) => {
       }
     }
   } catch (error) {
-    logger.error('CHAT', `Error: ${error.message}`, error.stack);
-    res.status(500).json({
-      error: 'Chat processing failed',
-      detail: error.message,
+    logger.error('CHAT', `Unhandled error: ${error.message}`, error.stack);
+    // Return a graceful response instead of raw 500
+    return res.status(200).json({
+      say: '嗯，出了一点小状况，稍后再试试吧。',
+      play: [],
+      reason: 'Internal error',
+      error: config.nodeEnv !== 'production' ? error.message : undefined,
     });
   }
 });

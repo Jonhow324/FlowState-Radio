@@ -270,4 +270,263 @@ describe('Brain', () => {
       expect(deepseekMock.isAvailable).toHaveBeenCalledTimes(1);
     });
   });
+
+  // --------------------------------------------------------------------------
+  describe('generateIntent() — Layer 1', () => {
+    it('includes environment context in intent', () => {
+      const { brain } = createMockedBrain();
+      const ctx = { environment: '雨天下午，20度', memory: '', userInput: '' };
+
+      const intent = brain.generateIntent(ctx);
+      expect(intent).toContain('雨天下午');
+    });
+
+    it('includes recent listening history', () => {
+      const { brain } = createMockedBrain();
+      const ctx = {
+        environment: '',
+        memory: '### 最近播放\n- 晴天 (周杰伦)\n- 七里香 (周杰伦)\n### 其他',
+        userInput: '',
+      };
+
+      const intent = brain.generateIntent(ctx);
+      expect(intent).toContain('最近听了');
+      expect(intent).toContain('晴天');
+    });
+
+    it('includes user input only for chat trigger', () => {
+      const { brain } = createMockedBrain();
+      const ctx = {
+        userInput: '来首安静的歌',
+        executionTrace: { triggerType: 'chat' },
+      };
+
+      const intent = brain.generateIntent(ctx);
+      expect(intent).toContain('用户说: 来首安静的歌');
+    });
+
+    it('does NOT include user input for scheduler trigger', () => {
+      const { brain } = createMockedBrain();
+      const ctx = {
+        userInput: 'some leftover text',
+        executionTrace: { triggerType: 'scheduler-morning' },
+      };
+
+      const intent = brain.generateIntent(ctx);
+      expect(intent).not.toContain('用户说');
+      expect(intent).toContain('早安时段');
+    });
+
+    it('adds scheduler-morning trigger context', () => {
+      const { brain } = createMockedBrain();
+      const ctx = { executionTrace: { triggerType: 'scheduler-morning' } };
+
+      const intent = brain.generateIntent(ctx);
+      expect(intent).toContain('早安时段');
+    });
+
+    it('adds scheduler-refill trigger context', () => {
+      const { brain } = createMockedBrain();
+      const ctx = { executionTrace: { triggerType: 'scheduler-refill' } };
+
+      const intent = brain.generateIntent(ctx);
+      expect(intent).toContain('队列补充');
+    });
+
+    it('adds scheduler-transition trigger context', () => {
+      const { brain } = createMockedBrain();
+      const ctx = { executionTrace: { triggerType: 'scheduler-transition' } };
+
+      const intent = brain.generateIntent(ctx);
+      expect(intent).toContain('时段过渡');
+    });
+
+    it('combines multiple context parts with period delimiter', () => {
+      const { brain } = createMockedBrain();
+      const ctx = {
+        environment: '晴天下午',
+        userInput: '想听摇滚',
+        executionTrace: { triggerType: 'chat' },
+      };
+
+      const intent = brain.generateIntent(ctx);
+      expect(intent).toContain('晴天下午');
+      expect(intent).toContain('想听摇滚');
+      expect(intent).toContain('。');
+    });
+
+    it('returns empty string when no context is provided', () => {
+      const { brain } = createMockedBrain();
+      const intent = brain.generateIntent({});
+      expect(intent).toBe('');
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  describe('_matchCandidatesToStore()', () => {
+    it('enriches LLM songs with ncmTrackId from candidates', () => {
+      const { brain } = createMockedBrain();
+
+      const llmSongs = [
+        { name: '晴天', artist: '周杰伦' },
+      ];
+      const candidates = [
+        { name: '晴天', artist: '周杰伦', ncmTrackId: '12345', tags: '华语流行', id: 'song:1' },
+        { name: '七里香', artist: '周杰伦', ncmTrackId: '67890', tags: '华语', id: 'song:2' },
+      ];
+
+      const result = brain._matchCandidatesToStore(llmSongs, candidates);
+
+      expect(result[0].ncmTrackId).toBe('12345');
+      expect(result[0].vectorId).toBe('song:1');
+      expect(result[0].tags).toBe('华语流行');
+    });
+
+    it('handles case-insensitive name matching', () => {
+      const { brain } = createMockedBrain();
+
+      const llmSongs = [{ name: 'Bohemian Rhapsody', artist: 'Queen' }];
+      const candidates = [
+        { name: 'bohemian rhapsody', artist: 'queen', ncmTrackId: '111', tags: '', id: 's1' },
+      ];
+
+      const result = brain._matchCandidatesToStore(llmSongs, candidates);
+      expect(result[0].ncmTrackId).toBe('111');
+    });
+
+    it('handles whitespace-trimmed matching', () => {
+      const { brain } = createMockedBrain();
+
+      const llmSongs = [{ name: ' 晴天 ', artist: ' 周杰伦 ' }];
+      const candidates = [
+        { name: '晴天', artist: '周杰伦', ncmTrackId: '222', tags: '', id: 's1' },
+      ];
+
+      const result = brain._matchCandidatesToStore(llmSongs, candidates);
+      expect(result[0].ncmTrackId).toBe('222');
+    });
+
+    it('returns song unchanged when not found in candidates', () => {
+      const { brain } = createMockedBrain();
+
+      const llmSongs = [{ name: '不存在的歌', artist: '未知歌手' }];
+      const candidates = [
+        { name: '晴天', artist: '周杰伦', ncmTrackId: '12345', tags: '', id: 's1' },
+      ];
+
+      const result = brain._matchCandidatesToStore(llmSongs, candidates);
+      expect(result[0].ncmTrackId).toBeUndefined();
+      expect(result[0].name).toBe('不存在的歌');
+    });
+
+    it('returns empty/null input unchanged', () => {
+      const { brain } = createMockedBrain();
+
+      expect(brain._matchCandidatesToStore([], [])).toEqual([]);
+      expect(brain._matchCandidatesToStore(null, [])).toBeNull();
+    });
+
+    it('handles candidates without ncmTrackId', () => {
+      const { brain } = createMockedBrain();
+
+      const llmSongs = [{ name: '晴天', artist: '周杰伦' }];
+      const candidates = [
+        { name: '晴天', artist: '周杰伦', ncmTrackId: null, tags: '华语', id: 's1' },
+      ];
+
+      const result = brain._matchCandidatesToStore(llmSongs, candidates);
+      expect(result[0].ncmTrackId).toBeNull();
+      expect(result[0].vectorId).toBe('s1');
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  describe('_buildRAGPrompt()', () => {
+    it('includes candidate list in the prompt', () => {
+      const { brain } = createMockedBrain();
+
+      const candidates = [
+        { name: '晴天', artist: '周杰伦', tags: '华语流行', mood: '青春怀旧', score: 0.9 },
+        { name: '七里香', artist: '周杰伦', tags: '华语', mood: '甜蜜浪漫', score: 0.8 },
+      ];
+
+      const prompt = brain._buildRAGPrompt(context, candidates);
+
+      expect(prompt).toContain('候选歌曲');
+      expect(prompt).toContain('晴天');
+      expect(prompt).toContain('周杰伦');
+      expect(prompt).toContain('七里香');
+      expect(prompt).toContain('华语流行');
+    });
+
+    it('includes environment and memory context', () => {
+      const { brain } = createMockedBrain();
+
+      const prompt = brain._buildRAGPrompt(context, []);
+
+      expect(prompt).toContain('Sunny afternoon');
+      expect(prompt).toContain('Bohemian Rhapsody');
+    });
+
+    it('instructs LLM to select from candidates only', () => {
+      const { brain } = createMockedBrain();
+
+      const candidates = [
+        { name: 'Test Song', artist: 'Test', tags: '', mood: '', score: 0.9 },
+      ];
+
+      const prompt = brain._buildRAGPrompt(context, candidates);
+
+      expect(prompt).toContain('候选歌曲列表中精选');
+      expect(prompt).toContain('必须与候选列表中的完全一致');
+    });
+
+    it('truncates long mood descriptions', () => {
+      const { brain } = createMockedBrain();
+
+      const longMood = '这是一段非常非常长的描述，包含了大量的情感细节和背景信息，远远超过了四十个字符的限制';
+      const candidates = [
+        { name: 'Test', artist: 'Art', tags: '', mood: longMood, score: 0.9 },
+      ];
+
+      const prompt = brain._buildRAGPrompt(context, candidates);
+
+      // The mood in the prompt should be truncated to 40 chars
+      expect(prompt).not.toContain(longMood);
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  describe('think() with RAG candidates', () => {
+    it('includes candidates count in result', async () => {
+      const { brain, deepseekMock, ruleEngineMock } = createMockedBrain({
+        deepseekApiKey: 'sk-test-key',
+      });
+
+      deepseekMock.isAvailable.mockResolvedValue(true);
+      deepseekMock.isCircuitOpen.mockReturnValue(false);
+      deepseekMock.think.mockResolvedValue(makeDeepSeekResult());
+      ruleEngineMock.think.mockReturnValue(makeRuleEngineResult());
+
+      // Without vector candidates (embedding not available)
+      const result = await brain.think(context);
+
+      expect(result).toHaveProperty('candidates');
+      expect(result.candidates).toBe(0);
+    });
+
+    it('returns source and candidates in rule-engine fallback', async () => {
+      const { brain, deepseekMock, ruleEngineMock } = createMockedBrain({
+        deepseekApiKey: '',
+      });
+
+      deepseekMock.isAvailable.mockResolvedValue(false);
+      ruleEngineMock.think.mockReturnValue(makeRuleEngineResult());
+
+      const result = await brain.think(context);
+
+      expect(result.source).toBe('rule-engine');
+      expect(result.candidates).toBe(0);
+    });
+  });
 });

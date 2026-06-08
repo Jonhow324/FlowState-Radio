@@ -273,7 +273,8 @@ router.post('/', async (req, res) => {
 
         // Think (brain builds prompt internally from context pieces)
         const aiResult = await brain.think(ctx);
-        logger.info('CHAT', `AI source: ${aiResult.source}, songs: ${aiResult.songs?.length || 0}`);
+        const ragInfo = aiResult.candidates ? ` (RAG: ${aiResult.candidates} candidates)` : '';
+        logger.info('CHAT', `AI source: ${aiResult.source}${ragInfo}, songs: ${aiResult.songs?.length || 0}`);
 
         // Resolve AI recommendations to real NCM tracks
         let resolvedTracks = [];
@@ -283,9 +284,22 @@ router.post('/', async (req, res) => {
           if (!ncmAvailable) {
             logger.warn('CHAT', 'NCM unhealthy — skipping song resolution, returning DJ text only');
           } else {
-            // New format: [{name, artist}] — search NCM for each
+            // New format: [{name, artist, ncmTrackId?}] — resolve each song
             for (const song of aiResult.songs) {
               try {
+                // Fast path: use pre-resolved NCM track ID from vector store
+                if (song.ncmTrackId) {
+                  logger.info('CHAT', `Using pre-resolved NCM ID for "${song.name}": ${song.ncmTrackId}`);
+                  resolvedTracks.push({
+                    trackId: song.ncmTrackId,
+                    trackName: song.name,
+                    artist: song.artist,
+                    albumArt: song.albumArt || null,
+                  });
+                  continue;
+                }
+
+                // Slow path: search NCM by name + artist
                 const keyword = `${song.name} ${song.artist}`.trim();
                 const results = await ncm.search(keyword, 1);
                 if (results.length > 0) {

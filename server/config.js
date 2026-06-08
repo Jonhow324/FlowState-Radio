@@ -11,6 +11,10 @@ const config = {
   deepseekApiKey: process.env.DEEPSEEK_API_KEY || '',
   deepseekModel: process.env.DEEPSEEK_MODEL || 'deepseek-chat',
 
+  // Embedding (DashScope / Tongyi Qianwen)
+  dashscopeApiKey: process.env.DASHSCOPE_API_KEY || '',
+  embeddingModel: process.env.EMBEDDING_MODEL || 'text-embedding-v3',
+
   // Legacy (kept for reference)
   anthropicApiKey: process.env.ANTHROPIC_API_KEY || '',
   aiModel: process.env.AI_MODEL || 'claude-sonnet-4-6',
@@ -34,6 +38,7 @@ const config = {
   userDir: require('path').resolve(__dirname, '../user'),
   promptsDir: require('path').resolve(__dirname, '../prompts'),
   ttsCacheDir: require('path').resolve(__dirname, '../data/cache/tts'),
+  vectorDbPath: require('path').resolve(__dirname, '../data/vector-db.json'),
 };
 
 module.exports = config;

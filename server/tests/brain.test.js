@@ -10,6 +10,7 @@ import Brain from '../brain';
 
 // Silence console output from the logger during tests
 let consoleSpy;
+
 beforeEach(() => {
   consoleSpy = {
     log: vi.spyOn(console, 'log').mockImplementation(() => {}),
@@ -94,6 +95,10 @@ function makeDeepSeekResult() {
 /**
  * Create a Brain instance with injected mock adapters.
  * Returns the brain and both mocks for convenient assertion.
+ *
+ * retrieveCandidates is stubbed to return null by default so that
+ * think() tests never touch the real embedding service or vector store.
+ * Tests that need RAG candidates can override brain.retrieveCandidates.
  */
 function createMockedBrain(config = {}) {
   const brain = new Brain({ deepseekApiKey: 'placeholder', ...config });
@@ -103,6 +108,9 @@ function createMockedBrain(config = {}) {
   // Inject mocks directly into the Brain instance, replacing the real adapters
   brain.deepseek = deepseekMock;
   brain.ruleEngine = ruleEngineMock;
+
+  // Stub out Layer 2 (vector retrieval) to avoid real API calls in tests
+  brain.retrieveCandidates = vi.fn().mockResolvedValue(null);
 
   return { brain, deepseekMock, ruleEngineMock };
 }

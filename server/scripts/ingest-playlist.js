@@ -1,11 +1,10 @@
 // scripts/ingest-playlist.js — Playlist CSV/TSV ingestion into vector database
 // Usage: node scripts/ingest-playlist.js <path-to-csv-or-tsv>
 //
-// Expected columns (header row required):
-//   序号 | 歌名 | 歌手 | 风格标签 | 核心歌词大意/情感基调 | 个人评分/听歌频率
-//
 // Supports both comma-separated (CSV) and tab-separated (TSV) formats.
-// Auto-detects delimiter based on first line.
+// Auto-detects delimiter and whether a header row is present.
+// If no header row is found, columns are mapped positionally:
+//   序号 | 歌名 | 歌手 | 风格标签 | 核心歌词大意/情感基调 | 个人评分/听歌频率
 
 const fs = require('fs');
 const path = require('path');
@@ -93,25 +92,57 @@ function mapColumns(headers) {
 }
 
 /**
+ * Check if a line looks like a data row (first field is a number = 序号)
+ */
+function isDataRow(line, delimiter) {
+  const fields = parseLine(line, delimiter);
+  return fields.length > 0 && /^\d+$/.test(fields[0].trim());
+}
+
+/**
+ * Default positional column mapping for headerless files
+ * Expected order: 序号, 歌名, 歌手, 风格标签, 情感基调, 评分
+ */
+function defaultColumnMapping() {
+  return { index: 0, name: 1, artist: 2, tags: 3, mood: 4, rating: 5 };
+}
+
+/**
  * Parse the full CSV/TSV file
+ * Supports both header-row and headerless formats.
  */
 function parseFile(filePath) {
-  const content = fs.readFileSync(filePath, 'utf-8');
+  const content = fs.readFileSync(filePath, 'utf-8').replace(/^\uFEFF/, ''); // strip BOM
   const lines = content.split(/\r?\n/).filter((l) => l.trim());
 
-  if (lines.length < 2) {
-    throw new Error('文件至少需要包含表头行和一行数据');
+  if (lines.length < 1) {
+    throw new Error('文件为空');
   }
 
   const delimiter = detectDelimiter(lines[0]);
-  const headers = parseLine(lines[0], delimiter);
-  const columns = mapColumns(headers);
+  let columns;
+  let startLine;
+
+  if (isDataRow(lines[0], delimiter)) {
+    // Headerless file — use positional mapping
+    columns = defaultColumnMapping();
+    startLine = 0;
+    logger.info('INGEST', 'No header row detected — using positional column mapping');
+  } else {
+    // First line is a header
+    if (lines.length < 2) {
+      throw new Error('文件至少需要包含表头行和一行数据');
+    }
+    const headers = parseLine(lines[0], delimiter);
+    columns = mapColumns(headers);
+    startLine = 1;
+  }
 
   logger.info('INGEST', `Detected delimiter: ${delimiter === '\t' ? 'TSV' : 'CSV'}`);
   logger.info('INGEST', `Columns mapped: name=${columns.name}, artist=${columns.artist}, tags=${columns.tags ?? 'N/A'}, mood=${columns.mood ?? 'N/A'}, rating=${columns.rating ?? 'N/A'}`);
 
   const songs = [];
-  for (let i = 1; i < lines.length; i++) {
+  for (let i = startLine; i < lines.length; i++) {
     const fields = parseLine(lines[i], delimiter);
     if (fields.length < 2) continue; // skip empty/malformed lines
 
@@ -120,7 +151,7 @@ function parseFile(filePath) {
     if (!name || !artist) continue;
 
     songs.push({
-      index: columns.index !== undefined ? fields[columns.index] : String(i),
+      index: columns.index !== undefined ? fields[columns.index] : String(i + 1),
       name: name.replace(/^["']|["']$/g, ''),
       artist: artist.replace(/^["']|["']$/g, ''),
       tags: columns.tags !== undefined ? (fields[columns.tags] || '').replace(/^["']|["']$/g, '') : '',

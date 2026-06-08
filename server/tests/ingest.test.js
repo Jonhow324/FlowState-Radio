@@ -99,6 +99,15 @@ function buildEmbeddingText(song) {
   return parts.join('. ');
 }
 
+function isDataRow(line, delimiter) {
+  const fields = parseLine(line, delimiter);
+  return fields.length > 0 && /^\d+$/.test(fields[0].trim());
+}
+
+function defaultColumnMapping() {
+  return { index: 0, name: 1, artist: 2, tags: 3, mood: 4, rating: 5 };
+}
+
 // ---------------------------------------------------------------------------
 // Temp file helpers
 // ---------------------------------------------------------------------------
@@ -369,6 +378,111 @@ describe('Ingest Parser', () => {
       const lines = content.split(/\r?\n/).filter(l => l.trim());
 
       expect(lines).toHaveLength(3);
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  describe('isDataRow()', () => {
+    it('returns true when first field is a number (data row)', () => {
+      expect(isDataRow('1,I Love You So,The Walters,Indie Pop,慵懒,待设定', ',')).toBe(true);
+    });
+
+    it('returns false when first field is a string (header row)', () => {
+      expect(isDataRow('序号,歌名,歌手,风格标签,情感基调,评分', ',')).toBe(false);
+    });
+
+    it('returns false for Chinese header text', () => {
+      expect(isDataRow('歌名,歌手,风格', ',')).toBe(false);
+    });
+
+    it('works with tab delimiter', () => {
+      expect(isDataRow('42\tSong Name\tArtist', '\t')).toBe(true);
+    });
+
+    it('returns false for empty line', () => {
+      expect(isDataRow('', ',')).toBe(false);
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  describe('defaultColumnMapping()', () => {
+    it('returns correct positional mapping', () => {
+      const mapping = defaultColumnMapping();
+      expect(mapping).toEqual({ index: 0, name: 1, artist: 2, tags: 3, mood: 4, rating: 5 });
+    });
+
+    it('always includes all six columns', () => {
+      const mapping = defaultColumnMapping();
+      expect(Object.keys(mapping)).toHaveLength(6);
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  describe('Headerless CSV parsing (integration)', () => {
+    it('correctly parses a headerless CSV with positional columns', () => {
+      const csv = [
+        '1,I Love You So,The Walters,"Indie Pop, Lo-fi, 浪漫",慵懒的告白,待设定',
+        '2,Frisco Blues,Lewis OfMan,"French Touch, Lofi",法式轻爵士,待设定',
+      ].join('\n');
+
+      const filePath = writeTmpFile('headerless.csv', csv);
+      const content = fs.readFileSync(filePath, 'utf-8').replace(/^\uFEFF/, '');
+      const lines = content.split(/\r?\n/).filter(l => l.trim());
+      const delimiter = detectDelimiter(lines[0]);
+
+      // Should detect as data row (no header)
+      expect(isDataRow(lines[0], delimiter)).toBe(true);
+
+      const columns = defaultColumnMapping();
+      const songs = [];
+      for (let i = 0; i < lines.length; i++) {
+        const fields = parseLine(lines[i], delimiter);
+        songs.push({
+          index: fields[columns.index],
+          name: fields[columns.name],
+          artist: fields[columns.artist],
+          tags: fields[columns.tags] || '',
+          mood: fields[columns.mood] || '',
+        });
+      }
+
+      expect(songs).toHaveLength(2);
+      expect(songs[0].name).toBe('I Love You So');
+      expect(songs[0].artist).toBe('The Walters');
+      expect(songs[0].tags).toBe('Indie Pop, Lo-fi, 浪漫');
+      expect(songs[1].name).toBe('Frisco Blues');
+    });
+
+    it('handles mixed quoted/unquoted tags in the same file', () => {
+      const csv = [
+        '1,Song A,Artist A,"Rock, Pop, 浪漫",摇滚的激情,待设定',
+        '2,Song B,Artist B,民谣，治愈，温暖,安静的夜晚,待设定',
+      ].join('\n');
+
+      const filePath = writeTmpFile('mixed.csv', csv);
+      const content = fs.readFileSync(filePath, 'utf-8').replace(/^\uFEFF/, '');
+      const lines = content.split(/\r?\n/).filter(l => l.trim());
+      const columns = defaultColumnMapping();
+
+      // Row 1: English commas inside quotes
+      const fields1 = parseLine(lines[0], ',');
+      expect(fields1[columns.tags]).toBe('Rock, Pop, 浪漫');
+
+      // Row 2: Chinese commas, no quotes — tags stay as one field
+      const fields2 = parseLine(lines[1], ',');
+      expect(fields2[columns.tags]).toBe('民谣，治愈，温暖');
+    });
+
+    it('handles BOM-prefixed headerless CSV', () => {
+      const csv = '\uFEFF1,晴天,周杰伦,华语流行,青春,5\n2,稻香,周杰伦,民谣,温暖,4';
+
+      const filePath = writeTmpFile('bom-headerless.csv', csv);
+      const content = fs.readFileSync(filePath, 'utf-8').replace(/^\uFEFF/, '');
+      const lines = content.split(/\r?\n/).filter(l => l.trim());
+
+      expect(isDataRow(lines[0], ',')).toBe(true);
+      const fields = parseLine(lines[0], ',');
+      expect(fields[1]).toBe('晴天');
     });
   });
 });

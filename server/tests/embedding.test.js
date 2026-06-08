@@ -9,7 +9,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 // Mock config and logger to prevent issues with real config
 vi.mock('../config', () => ({
   dashscopeApiKey: 'sk-test-key-for-unit-tests',
-  embeddingModel: 'text-embedding-v3',
+  embeddingModel: 'text-embedding-v4',
 }));
 vi.mock('../utils/logger', () => ({
   info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn(),
@@ -27,7 +27,7 @@ beforeEach(() => {
   };
   // Ensure service is configured
   embedding.apiKey = 'sk-test-key-for-unit-tests';
-  embedding.model = 'text-embedding-v3';
+  embedding.model = 'text-embedding-v4';
   embedding.dimensions = 1024;
   // Restore original _callAPI if previously mocked
   vi.restoreAllMocks();
@@ -242,7 +242,7 @@ describe('EmbeddingService', () => {
   // --------------------------------------------------------------------------
   describe('constructor defaults', () => {
     it('has correct default model name', () => {
-      expect(embedding.model).toBe('text-embedding-v3');
+      expect(embedding.model).toBe('text-embedding-v4');
     });
 
     it('has correct default dimensions', () => {

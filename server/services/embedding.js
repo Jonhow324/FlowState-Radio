@@ -1,4 +1,4 @@
-// services/embedding.js — DashScope text-embedding-v3 adapter
+// services/embedding.js — DashScope text-embedding-v4 adapter
 // Uses OpenAI-compatible endpoint for vectorizing text
 
 const axios = require('axios');
@@ -13,7 +13,7 @@ const DEFAULT_DIMENSIONS = 1024;
 class EmbeddingService {
   constructor() {
     this.apiKey = config.dashscopeApiKey || '';
-    this.model = config.embeddingModel || 'text-embedding-v3';
+    this.model = config.embeddingModel || 'text-embedding-v4';
     this.dimensions = DEFAULT_DIMENSIONS;
   }
 

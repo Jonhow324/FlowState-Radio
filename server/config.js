@@ -13,7 +13,7 @@ const config = {
 
   // Embedding (DashScope / Tongyi Qianwen)
   dashscopeApiKey: process.env.DASHSCOPE_API_KEY || '',
-  embeddingModel: process.env.EMBEDDING_MODEL || 'text-embedding-v3',
+  embeddingModel: process.env.EMBEDDING_MODEL || 'text-embedding-v4',
 
   // Legacy (kept for reference)
   anthropicApiKey: process.env.ANTHROPIC_API_KEY || '',

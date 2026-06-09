@@ -376,9 +376,11 @@ class Scheduler {
    * Called by chat.js or the playback pipeline before each song transition
    * @param {object} [prevSong] - { name, artist } of the song just finished
    * @param {object} [nextSong] - { name, artist } of the upcoming song
+   * @param {object} [options] - { silent: boolean } — if true, suppress dj-talk broadcast
    * @returns {Promise<{ text: string, ttsUrl: string|null }|null>}
    */
-  async generateTransition(prevSong, nextSong) {
+  async generateTransition(prevSong, nextSong, options = {}) {
+    const { silent = false } = options;
     this._consecutivePlays++;
 
     // Decide filler reason
@@ -407,10 +409,10 @@ class Scheduler {
       logger.warn('SCHEDULER', `Filler TTS failed: ${err.message}`);
     }
 
-    // Log and broadcast
+    // Log and broadcast (unless silent mode — caller will embed TTS into now-playing)
     state.logMessage('claudio', fillerResult.text);
 
-    if (this.broadcast) {
+    if (!silent && this.broadcast) {
       this.broadcast({
         type: 'dj-talk',
         data: {

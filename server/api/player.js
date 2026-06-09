@@ -8,6 +8,8 @@ const express = require('express');
 const router = express.Router();
 const state = require('../state');
 const ncm = require('../services/ncm');
+const scheduler = require('../scheduler');
+const filler = require('../services/filler');
 const logger = require('../utils/logger');
 
 /**
@@ -85,6 +87,15 @@ router.post('/play', async (req, res) => {
     }
 
     // Play next from queue
+    // Capture previous song info before shifting
+    const prevForQueueNext = current.now_playing_track_id
+      ? {
+          name: state.getTrackMeta(current.now_playing_track_id)?.track_name || 'Unknown',
+          artist: state.getTrackMeta(current.now_playing_track_id)?.artist || 'Unknown',
+          trackId: current.now_playing_track_id,
+        }
+      : null;
+
     const next = state.shiftQueue();
     if (next) {
       let url;
@@ -94,30 +105,58 @@ router.post('/play', async (req, res) => {
         logger.warn('PLAYER', `Queue-next: cannot get URL for ${next.track_id}: ${err.message}`);
         return res.status(502).json({ error: 'Failed to fetch play URL', trackId: next.track_id });
       }
+
+      const meta = state.getTrackMeta(next.track_id);
+      const nextSongInfo = {
+        name: meta?.track_name || next.track_name,
+        artist: meta?.artist || next.artist,
+      };
+
+      // ── Filler / Transition Logic ────────────────────────────
+      let transitionStyle = next.transitionStyle || meta?.transitionStyle || 'outro';
+      let fillerData = null;
+
+      if (filler.shouldInsertFiller(scheduler._consecutivePlays)) {
+        try {
+          fillerData = await scheduler.generateTransition(prevForQueueNext, nextSongInfo, { silent: true });
+          if (fillerData?.ttsUrl) {
+            transitionStyle = 'intro';
+          }
+        } catch (err) {
+          logger.warn('PLAYER', `Filler generation failed: ${err.message}`);
+        }
+      } else {
+        scheduler._consecutivePlays++;
+      }
+
       state.updateCurrentState({
         now_playing_track_id: next.track_id,
         now_playing_started: new Date().toISOString(),
         is_playing: true,
       });
-      state.logPlay(next.track_id, next.track_name, next.artist, 'queue', 'Auto next');
+      state.logPlay(next.track_id, nextSongInfo.name, nextSongInfo.artist, 'queue', 'Auto next');
 
-      const meta = state.getTrackMeta(next.track_id);
       const nowPlayingData = {
         trackId: next.track_id,
-        trackName: meta?.track_name || next.track_name,
-        artist: meta?.artist || next.artist,
+        trackName: nextSongInfo.name,
+        artist: nextSongInfo.artist,
         albumArt: meta?.album_art || null,
         url,
+        transitionStyle,
       };
+
+      if (fillerData?.ttsUrl) {
+        nowPlayingData.ttsUrl = fillerData.ttsUrl;
+        nowPlayingData.fillerText = fillerData.text;
+        nowPlayingData.fillerType = fillerData.type;
+      }
 
       if (broadcast) {
         broadcast({ type: 'now-playing', data: nowPlayingData });
       }
 
-      // Auto-refill queue if running low
-      if (state.getQueueLength() < 3) {
-        logger.info('PLAYER', 'Queue running low, needs refill');
-      }
+      // ── Rolling Queue Check ──────────────────────────────────
+      scheduler.checkAndPrefetch().catch(() => {});
 
       return res.json({ success: true, nowPlaying: nowPlayingData });
     }
@@ -152,6 +191,16 @@ router.post('/skip', async (req, res) => {
   const broadcast = req.app.get('broadcast');
 
   try {
+    // Capture previous song info before shifting
+    const currentState = state.getCurrentState();
+    const prevSong = currentState.now_playing_track_id
+      ? {
+          name: state.getTrackMeta(currentState.now_playing_track_id)?.track_name || 'Unknown',
+          artist: state.getTrackMeta(currentState.now_playing_track_id)?.artist || 'Unknown',
+          trackId: currentState.now_playing_track_id,
+        }
+      : null;
+
     const next = state.shiftQueue();
 
     if (next) {
@@ -164,27 +213,64 @@ router.post('/skip', async (req, res) => {
         state.prependToQueue(next);
         return res.status(502).json({ error: '音乐服务暂时不可用，跳过失败', code: 'NCM_UNAVAILABLE' });
       }
+
+      const meta = state.getTrackMeta(next.track_id);
+      const nextSongInfo = {
+        name: meta?.track_name || next.track_name,
+        artist: meta?.artist || next.artist,
+      };
+
+      // ── Filler / Transition Logic ────────────────────────────
+      let transitionStyle = next.transitionStyle || meta?.transitionStyle || 'outro';
+      let fillerData = null;
+
+      if (filler.shouldInsertFiller(scheduler._consecutivePlays)) {
+        // Generate filler DJ talk (TTS + broadcast dj-talk event)
+        try {
+          fillerData = await scheduler.generateTransition(prevSong, nextSongInfo, { silent: true });
+          // If filler has TTS, use intro mode so DJ talks over the new song's intro
+          if (fillerData?.ttsUrl) {
+            transitionStyle = 'intro';
+          }
+        } catch (err) {
+          logger.warn('PLAYER', `Filler generation failed: ${err.message}`);
+        }
+      } else {
+        // Increment counter when no filler inserted
+        scheduler._consecutivePlays++;
+      }
+
       state.updateCurrentState({
         now_playing_track_id: next.track_id,
         now_playing_started: new Date().toISOString(),
         is_playing: true,
       });
-      state.logPlay(next.track_id, next.track_name, next.artist, 'skip', 'User skipped');
+      state.logPlay(next.track_id, nextSongInfo.name, nextSongInfo.artist, 'skip', 'User skipped');
 
-      const meta = state.getTrackMeta(next.track_id);
       const nowPlayingData = {
         trackId: next.track_id,
-        trackName: meta?.track_name || next.track_name,
-        artist: meta?.artist || next.artist,
+        trackName: nextSongInfo.name,
+        artist: nextSongInfo.artist,
         albumArt: meta?.album_art || null,
         url,
+        transitionStyle,
       };
 
-      logger.info('PLAYER', `Skipped to: ${nowPlayingData.trackName}`);
+      // Attach filler TTS info — use ttsUrl key so frontend intro/outro handler picks it up
+      if (fillerData?.ttsUrl) {
+        nowPlayingData.ttsUrl = fillerData.ttsUrl;
+        nowPlayingData.fillerText = fillerData.text;
+        nowPlayingData.fillerType = fillerData.type;
+      }
+
+      logger.info('PLAYER', `Skipped to: ${nowPlayingData.trackName} [${transitionStyle}]`);
 
       if (broadcast) {
         broadcast({ type: 'now-playing', data: nowPlayingData });
       }
+
+      // ── Rolling Queue Check ──────────────────────────────────
+      scheduler.checkAndPrefetch().catch(() => {});
 
       return res.json({ success: true, nowPlaying: nowPlayingData });
     }

@@ -4,7 +4,7 @@
 
 ## 架构概览
 
-用户对话 → **Layer 1** 意图生成（规则引擎，无 LLM）→ **Layer 2** 向量检索（余弦相似度，Top 20）→ **Layer 3** DeepSeek 精选 3-5 首 + 生成 DJ 脚本 → NCM 解析 → TTS 合成 → 播放
+用户对话 → **Layer 1** 意图生成（规则引擎，无 LLM）→ **Layer 2** 向量检索（余弦相似度，Top 20）→ **Layer 3** DeepSeek 精选 10-20 首 + 生成 DJ 脚本 → NCM 解析 → TTS 合成 → 播放
 
 ## 环境准备
 
@@ -188,6 +188,52 @@ node scripts/resolve-ncm.js --overwrite
 
 ---
 
+## 播放与转场机制
+
+### 播放路径
+
+前端通过 `POST /api/player/skip` 切歌（手动跳过或歌曲自动播完均走此路径），`POST /api/player/play` 用于指定播放、恢复暂停、或从队列取下一首。
+
+### Filler 转场 DJ
+
+连续播放超过 3 首歌没有 DJ 串词时，系统会自动插入一段 Filler DJ 话术（模板生成 + TTS 合成），避免长时间纯音乐播放。
+
+触发逻辑位于 `player.js` 的 `/skip` 和 `/play`（队列下一首）端点中：
+
+1. `scheduler._consecutivePlays` 记录连续播放次数
+2. 每次切歌检查 `filler.shouldInsertFiller(count)`（默认阈值 3）
+3. 达到阈值后调用 `scheduler.generateTransition(prevSong, nextSong, { silent: true })`
+4. 生成 Filler 文本 → TTS 合成音频 → 以 `{ silent: true }` 抑制独立 `dj-talk` 广播
+5. 将 `ttsUrl`、`transitionStyle`（设为 `intro`）、`fillerType` 打包进 `now-playing` WebSocket 事件
+
+前端收到带 `ttsUrl` 的 `now-playing` 事件后，进入 **intro 转场模式**：新歌以低音量（ducked）开始播放，DJ 语音叠加在新歌 intro 上方，语音结束后音乐渐强恢复正常音量。
+
+### Transition Style
+
+Brain 在 Layer 3 选歌时会为每首歌标注 `transition_style`（`intro` / `outro` / `none`），决定 DJ 语音与歌曲的衔接方式：
+
+| 风格 | 行为 |
+|------|------|
+| `intro` | DJ 语音叠加在新歌 intro 上播放，结束后音乐渐强 |
+| `outro` | 当前歌曲渐弱（duck），DJ 说话，说完后 crossfade 到新歌 |
+| `none` | 直接切换，无 DJ 语音 |
+
+### 滚动队列（Rolling Queue）
+
+当播放队列剩余歌曲 ≤ 2 首时，自动触发 `scheduler.checkAndPrefetch()`，异步调用 Brain 补充 10 首新歌，确保播放不会中断。预取过程使用 `_prefetching` 锁防止并发请求。
+
+### 相关文件
+
+| 文件 | 职责 |
+|------|------|
+| `server/api/player.js` | 播放端点，集成 filler 触发 + 滚动队列检查 |
+| `server/services/filler.js` | Filler 模板系统（时段 / 天气 / 连续播放 / 过渡词） |
+| `server/scheduler.js` | 调度器：cron 任务 + generateTransition + checkAndPrefetch |
+| `client/src/stores/appStore.js` | 前端音频引擎：intro/outro ducking + crossfade |
+| `client/src/hooks/useWebSocket.js` | WebSocket 事件处理：now-playing / dj-talk |
+
+---
+
 ## 运行测试
 
 ```bash
@@ -204,21 +250,30 @@ claudio/
 ├── data/
 │   └── vector-db.json            # 向量数据库（歌曲 + embedding + NCM 信息）
 ├── client/                       # React 前端（Vite + Tailwind + PWA）
-│   ├── src/                      # 页面组件
+│   ├── src/
+│   │   ├── stores/appStore.js    # Zustand 状态 + 音频引擎（ducking / crossfade）
+│   │   ├── hooks/useWebSocket.js # WebSocket 事件处理
+│   │   └── ...                   # 页面组件
 │   └── vite.config.js            # 开发代理配置（/api → :8000）
 ├── server/                       # Express 后端
 │   ├── index.js                  # 入口 + 路由
 │   ├── config.js                 # 配置聚合
 │   ├── brain.js                  # 三层 RAG 大脑
 │   ├── context.js                # 上下文组装（天气/时间/记忆）
+│   ├── router.js                 # 意图路由
+│   ├── scheduler.js              # 定时任务 + 滚动队列 + filler 转场
+│   ├── state.js                  # 播放状态管理
+│   ├── tts.js                    # TTS 合成服务
 │   ├── scripts/
 │   │   ├── ingest-playlist.js    # 歌单导入脚本
 │   │   └── resolve-ncm.js       # NCM trackId 匹配脚本
 │   ├── services/
 │   │   ├── embedding.js          # DashScope embedding 服务
+│   │   ├── filler.js             # Filler 转场 DJ 话术模板
 │   │   ├── vectorStore.js        # 向量存储 + 余弦相似度搜索
 │   │   └── ncm.js                # NCM API 封装
 │   ├── api/
+│   │   ├── player.js             # 播放控制（play / pause / skip / volume）
 │   │   └── chat.js               # 聊天 API（完整 RAG 管线）
 │   └── tests/                    # 单元测试（vitest）
 └── README.md

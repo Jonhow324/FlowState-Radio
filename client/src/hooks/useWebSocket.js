@@ -29,6 +29,7 @@ function useWebSocket() {
 
           if (data.ttsUrl && (transitionStyle === 'intro' || transitionStyle === 'outro')) {
             // Intro/Outro mode: play song under DJ voice with ducking
+            if (data.fillerType) store.setFillerType(data.fillerType);
             store.playWithTTS(data.ttsUrl, data.url, trackInfo, transitionStyle);
           } else {
             // Direct play

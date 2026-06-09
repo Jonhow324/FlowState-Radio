@@ -12,6 +12,7 @@ const config = require('../config');
 const logger = require('../utils/logger');
 const tts = require('../tts');
 const scheduler = require('../scheduler');
+const filler = require('../services/filler');
 
 // Singleton brain instance
 const brain = new Brain(config);
@@ -67,44 +68,59 @@ router.post('/', async (req, res) => {
       }
 
       case 'skip': {
+        // Before skipping: check if we should insert a filler DJ talk
+        const currentMeta = state.getCurrentState().now_playing_track_id
+          ? state.getTrackMeta(state.getCurrentState().now_playing_track_id) : null;
+        const prevSong = currentMeta ? { name: currentMeta.track_name, artist: currentMeta.artist } : null;
+
         const next = state.shiftQueue();
         if (next) {
           const url = await safeGetSongUrl(next.track_id);
           if (!url) {
-            // Try to skip to the next one in queue instead
             logger.warn('CHAT', `Cannot get URL for ${next.track_id}, trying next in queue`);
             const fallback = state.shiftQueue();
             if (fallback) {
               const fallbackUrl = await safeGetSongUrl(fallback.track_id);
               if (fallbackUrl) {
+                const fallbackMeta = state.getTrackMeta(fallback.track_id);
+                const nextSong = { name: fallbackMeta?.track_name || fallback.track_name, artist: fallbackMeta?.artist || fallback.artist };
+
+                // Check if filler is needed
+                if (scheduler.shouldInsertFiller && filler.shouldInsertFiller(scheduler._consecutivePlays)) {
+                  scheduler.generateTransition(prevSong, nextSong).catch(() => {});
+                }
+
                 state.updateCurrentState({
                   now_playing_track_id: fallback.track_id,
                   now_playing_started: new Date().toISOString(),
                   is_playing: true,
                 });
-                const meta = state.getTrackMeta(fallback.track_id);
                 if (broadcast) {
                   broadcast({
                     type: 'now-playing',
                     data: {
                       trackId: fallback.track_id,
-                      trackName: meta?.track_name || fallback.track_name,
-                      artist: meta?.artist || fallback.artist,
-                      albumArt: meta?.album_art || null,
+                      trackName: fallbackMeta?.track_name || fallback.track_name,
+                      artist: fallbackMeta?.artist || fallback.artist,
+                      albumArt: fallbackMeta?.album_art || null,
                       url: fallbackUrl,
+                      transitionStyle: fallback.transitionStyle || 'outro',
                     },
                   });
                 }
+
+                // Rolling queue check
+                scheduler.checkAndPrefetch().catch(() => {});
+
                 return res.json({
                   say: null,
                   play: [fallback.track_id],
                   reason: 'Skipped (fallback)',
                   action: 'skip',
-                  nowPlaying: { trackId: fallback.track_id, url: fallbackUrl, trackName: meta?.track_name || fallback.track_name },
+                  nowPlaying: { trackId: fallback.track_id, url: fallbackUrl, trackName: fallbackMeta?.track_name || fallback.track_name },
                 });
               }
             }
-            // All fallback exhausted
             return res.json({
               say: '抱歉，音乐服务暂时不可用，请稍后再试。',
               play: [],
@@ -113,21 +129,22 @@ router.post('/', async (req, res) => {
             });
           }
 
+          const meta = state.getTrackMeta(next.track_id);
+          const nextSong = { name: meta?.track_name || next.track_name, artist: meta?.artist || next.artist };
+
+          // Check if filler is needed between songs
+          if (filler.shouldInsertFiller(scheduler._consecutivePlays)) {
+            scheduler.generateTransition(prevSong, nextSong).catch(() => {});
+          }
+
           state.updateCurrentState({
             now_playing_track_id: next.track_id,
             now_playing_started: new Date().toISOString(),
             is_playing: true,
           });
-          const meta = state.getTrackMeta(next.track_id);
 
-          // Check queue level — auto-refill if < 3
-          const queueLen = state.getQueueLength();
-          if (queueLen < 3) {
-            logger.info('CHAT', `Queue low (${queueLen}), triggering auto-refill`);
-            scheduler.triggerRefill().catch((err) =>
-              logger.warn('CHAT', `Auto-refill failed: ${err.message}`)
-            );
-          }
+          // Rolling queue: prefetch when running low
+          scheduler.checkAndPrefetch().catch(() => {});
 
           if (broadcast) {
             broadcast({
@@ -138,6 +155,7 @@ router.post('/', async (req, res) => {
                 artist: meta?.artist || next.artist,
                 albumArt: meta?.album_art || null,
                 url,
+                transitionStyle: next.transitionStyle || 'outro',
               },
             });
           }
@@ -361,29 +379,36 @@ router.post('/', async (req, res) => {
               state.logPlay(first.track_id, first.track_name, first.artist, aiResult.source, aiResult.reason);
 
               const meta = state.getTrackMeta(first.track_id);
+              // Get transition style from the AI's first song recommendation
+              const firstSong = aiResult.songs?.[0];
+              const transitionStyle = firstSong?.transitionStyle || firstSong?.transition_style || 'intro';
+
               nowPlaying = {
                 trackId: first.track_id,
                 trackName: meta?.track_name || first.track_name,
                 artist: meta?.artist || first.artist,
                 albumArt: meta?.album_art || null,
                 url,
+                transitionStyle,
               };
 
               if (broadcast) {
                 // Push DJ talk first if AI has something to say (with TTS)
                 if (aiResult.say) {
+                  // AI is talking — reset the filler counter
+                  scheduler.resetPlayCounter();
                   try {
                     const ttsResult = await tts.synthesize(aiResult.say);
                     broadcast({
                       type: 'dj-talk',
-                      data: { text: aiResult.say, ttsUrl: ttsResult.url },
+                      data: { text: aiResult.say, ttsUrl: ttsResult.url, transitionStyle },
                     });
                     nowPlaying.ttsUrl = ttsResult.url;
                   } catch (ttsErr) {
                     logger.warn('CHAT', `TTS synthesis failed: ${ttsErr.message}`);
                     broadcast({
                       type: 'dj-talk',
-                      data: { text: aiResult.say, ttsUrl: null },
+                      data: { text: aiResult.say, ttsUrl: null, transitionStyle },
                     });
                   }
                 }

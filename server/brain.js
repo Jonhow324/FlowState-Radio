@@ -203,7 +203,13 @@ class Brain {
       '',
       '# 输出要求',
       '严格返回 JSON 格式：',
-      '{"say": "DJ串词(自然语言，可为null)", "songs": [{"name": "歌曲名", "artist": "歌手"}], "reason": "选歌理由", "segue": "过渡词(可为null)"}',
+      '{"say": "DJ串词(自然语言，可为null)", "songs": [{"name": "歌曲名", "artist": "歌手", "transition_style": "intro|outro|none"}], "reason": "选歌理由", "segue": "过渡词(可为null)"}',
+      '',
+      'transition_style 说明：',
+      '  - "intro": DJ 在新歌前奏（低音量）时说话，说完歌曲正式进入',
+      '  - "outro": 上一首歌尾奏渐弱，DJ 总结后新歌响起',
+      '  - "none": 直接切换，无 DJ 串词',
+      '第一首歌建议用 "intro"，歌曲之间用 "outro" 衔接。',
       '',
       '从上面的候选歌曲列表中精选 10-20 首最适合当前场景的歌曲。',
       'songs 数组中的 name 和 artist 必须与候选列表中的完全一致，不要编造新歌。',
@@ -230,7 +236,8 @@ class Brain {
       '',
       '# 输出要求',
       '严格返回 JSON 格式：',
-      '{"say": "DJ串词(自然语言，可为null)", "songs": [{"name": "歌曲名", "artist": "歌手"}], "reason": "选歌理由", "segue": "过渡词(可为null)"}',
+      '{"say": "DJ串词(自然语言，可为null)", "songs": [{"name": "歌曲名", "artist": "歌手", "transition_style": "intro|outro|none"}], "reason": "选歌理由", "segue": "过渡词(可为null)"}',
+      'transition_style: "intro"(新歌前奏垫底说话) 或 "outro"(旧歌尾奏渐弱后切入) 或 "none"(直接切换)。',
       'songs 数组中填入歌曲名称和歌手名，推荐 10-20 首。必须是真实存在的歌曲。',
       '根据用户的品味、当前环境、时间和记忆来选择最合适的音乐。',
       '注意：不要编造歌曲，请推荐你确认真实存在的歌曲。',
@@ -260,12 +267,16 @@ class Brain {
           vectorId: match.id,
           ncmTrackId: match.ncmTrackId || null,
           tags: match.tags,
+          transitionStyle: song.transition_style || song.transitionStyle || 'outro',
         };
       }
 
       // LLM selected a song not in candidates (shouldn't happen in RAG mode, but handle gracefully)
       logger.warn('BRAIN', `LLM selected "${song.name}" not found in candidates`);
-      return song;
+      return {
+        ...song,
+        transitionStyle: song.transition_style || song.transitionStyle || 'outro',
+      };
     });
   }
 }

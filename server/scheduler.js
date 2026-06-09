@@ -1,5 +1,6 @@
 // scheduler.js — Claudio's Rhythm Scheduler (cron-based)
 // 3 scheduled tasks: daily plan (07:00), morning briefing (09:00), hourly check
+// Plus: rolling queue pre-fetch + filler transition system
 
 const cron = require('node-cron');
 const context = require('./context');
@@ -7,14 +8,23 @@ const Brain = require('./brain');
 const state = require('./state');
 const ncm = require('./services/ncm');
 const tts = require('./tts');
+const filler = require('./services/filler');
 const config = require('./config');
 const logger = require('./utils/logger');
+
+// ── Rolling Queue Config ──────────────────────────────────────
+const PREFETCH_THRESHOLD = 2;  // Trigger refill when ≤ this many songs left
+const PREFETCH_COUNT = 10;     // Request this many songs per refill
+const FILLER_STRETCH_LIMIT = 3; // Insert filler DJ talk after this many consecutive plays without DJ
 
 class Scheduler {
   constructor() {
     this.brain = new Brain(config);
     this.broadcast = null; // Set after server starts
     this.tasks = [];
+    this._consecutivePlays = 0;    // Tracks songs played without DJ talk
+    this._prefetching = false;     // Prevent concurrent prefetch requests
+    this._lastWeather = null;      // Cache for weather-based fillers
   }
 
   /**
@@ -259,12 +269,21 @@ class Scheduler {
 
     const queueLength = state.getQueueLength();
 
-    // Auto-refill queue when < 3 tracks
-    if (queueLength < 3) {
-      logger.info('SCHEDULER', `[Hourly] Queue low (${queueLength} tracks), auto-refilling...`);
+    // Auto-refill queue when running low (Rolling Queue)
+    if (queueLength <= PREFETCH_THRESHOLD) {
+      logger.info('SCHEDULER', `[Hourly] Queue low (${queueLength} ≤ ${PREFETCH_THRESHOLD}), auto-refilling...`);
       await this.autoRefillQueue();
       return;
     }
+
+    // Weather-based filler: update cached weather for filler generation
+    try {
+      const ctx = await context.assemble({ triggerType: 'hourly-weather' });
+      if (ctx.environment) {
+        const weatherMatch = ctx.environment.match(/天气[:：]\s*(.+?)(?:\n|$)/);
+        if (weatherMatch) this.setWeather(weatherMatch[1]);
+      }
+    } catch (_) { /* ignore */ }
 
     // Check if it's a transition time (style change)
     const hour = new Date().getHours();
@@ -279,48 +298,162 @@ class Scheduler {
   }
 
   /**
-   * Auto-refill queue when < 3 tracks
-   * AI recommends 5 songs to fill the queue
+   * Auto-refill queue when running low (Rolling Queue mechanism)
+   * Prefetches PREFETCH_COUNT songs asynchronously and appends to queue
    */
   async autoRefillQueue() {
-    const ctx = await context.assemble({
-      userInput: '播放队列快空了，请根据我最近的听歌记录和当前时间，再推荐 5 首我会喜欢的歌。',
-      triggerType: 'scheduler-refill',
-    });
+    if (this._prefetching) {
+      logger.info('SCHEDULER', 'Prefetch already in progress, skipping');
+      return;
+    }
+    this._prefetching = true;
 
-    const result = await this.brain.think(ctx);
+    try {
+      logger.info('SCHEDULER', `[Rolling Queue] Prefetching ${PREFETCH_COUNT} songs...`);
 
-    let resolvedTracks = [];
-    if (result.songs && result.songs.length > 0) {
-      for (const song of result.songs) {
-        try {
-          const keyword = `${song.name} ${song.artist}`.trim();
-          const results = await ncm.search(keyword, 1);
-          if (results.length > 0) {
-            resolvedTracks.push(results[0]);
+      const ctx = await context.assemble({
+        userInput: `播放队列快空了，请根据我最近的听歌记录和当前时间，再推荐 ${PREFETCH_COUNT} 首我会喜欢的歌。`,
+        triggerType: 'scheduler-refill',
+      });
+
+      const result = await this.brain.think(ctx);
+
+      let resolvedTracks = [];
+      if (result.songs && result.songs.length > 0) {
+        for (const song of result.songs) {
+          try {
+            // Fast path: use pre-resolved NCM ID
+            if (song.ncmTrackId) {
+              resolvedTracks.push({
+                trackId: song.ncmTrackId,
+                trackName: song.name,
+                artist: song.artist,
+                albumArt: song.albumArt || null,
+                transitionStyle: song.transitionStyle || 'outro',
+              });
+              continue;
+            }
+
+            const keyword = `${song.name} ${song.artist}`.trim();
+            const results = await ncm.search(keyword, 1);
+            if (results.length > 0) {
+              resolvedTracks.push({
+                ...results[0],
+                transitionStyle: song.transitionStyle || 'outro',
+              });
+            }
+          } catch (err) {
+            logger.warn('SCHEDULER', `Refill NCM search failed: ${err.message}`);
           }
-        } catch (err) {
-          logger.warn('SCHEDULER', `Refill NCM search failed: ${err.message}`);
         }
       }
+
+      if (resolvedTracks.length > 0) {
+        for (const track of resolvedTracks) {
+          state.setTrackMeta(track.trackId, track);
+        }
+        state.addToQueue(resolvedTracks, 'scheduler-refill', result.reason || 'Rolling queue refill');
+        logger.info('SCHEDULER', `Rolling queue: added ${resolvedTracks.length} tracks`);
+
+        if (this.broadcast) {
+          this.broadcast({
+            type: 'queue-update',
+            data: { queue: state.getQueue() },
+          });
+        }
+      } else {
+        logger.warn('SCHEDULER', 'Rolling queue refill: no tracks resolved');
+      }
+    } finally {
+      this._prefetching = false;
+    }
+  }
+
+  // ── Filler / Transition System ──────────────────────────────
+
+  /**
+   * Check if a filler DJ talk should be inserted between songs
+   * Called by chat.js or the playback pipeline before each song transition
+   * @param {object} [prevSong] - { name, artist } of the song just finished
+   * @param {object} [nextSong] - { name, artist } of the upcoming song
+   * @returns {Promise<{ text: string, ttsUrl: string|null }|null>}
+   */
+  async generateTransition(prevSong, nextSong) {
+    this._consecutivePlays++;
+
+    // Decide filler reason
+    let reason = 'gap';
+    if (this._consecutivePlays >= FILLER_STRETCH_LIMIT) {
+      reason = 'stretch';
+      this._consecutivePlays = 0; // Reset counter
+    } else if (prevSong && nextSong) {
+      // Check for style transition (different tags/genre)
+      reason = 'transition';
     }
 
-    if (resolvedTracks.length > 0) {
-      for (const track of resolvedTracks) {
-        state.setTrackMeta(track.trackId, track);
-      }
-      state.addToQueue(resolvedTracks, 'scheduler-refill', result.reason || 'Auto-refill');
-      logger.info('SCHEDULER', `Queue refilled with ${resolvedTracks.length} tracks`);
+    const fillerResult = filler.generateFiller({
+      reason,
+      weather: this._lastWeather,
+      prevSong: prevSong?.name,
+      prevArtist: prevSong?.artist,
+    });
 
-      if (this.broadcast) {
-        this.broadcast({
-          type: 'queue-update',
-          data: { queue: state.getQueue() },
-        });
-      }
-    } else {
-      logger.warn('SCHEDULER', 'Queue refill failed: no tracks resolved');
+    // Try to synthesize TTS for the filler
+    let ttsUrl = null;
+    try {
+      const ttsResult = await tts.synthesize(fillerResult.text);
+      ttsUrl = ttsResult.url;
+    } catch (err) {
+      logger.warn('SCHEDULER', `Filler TTS failed: ${err.message}`);
     }
+
+    // Log and broadcast
+    state.logMessage('claudio', fillerResult.text);
+
+    if (this.broadcast) {
+      this.broadcast({
+        type: 'dj-talk',
+        data: {
+          text: fillerResult.text,
+          ttsUrl,
+          fillerType: fillerResult.type,
+        },
+      });
+    }
+
+    logger.info('SCHEDULER', `Filler (${fillerResult.type}): "${fillerResult.text}"`);
+    return { text: fillerResult.text, ttsUrl, type: fillerResult.type };
+  }
+
+  /**
+   * Reset the consecutive play counter (called when DJ talks naturally)
+   */
+  resetPlayCounter() {
+    this._consecutivePlays = 0;
+  }
+
+  /**
+   * Update cached weather for filler generation
+   */
+  setWeather(weatherDesc) {
+    this._lastWeather = weatherDesc;
+  }
+
+  /**
+   * Check queue level and trigger prefetch if needed (Rolling Queue)
+   * Called after each song skip/transition
+   */
+  async checkAndPrefetch() {
+    const queueLen = state.getQueueLength();
+    if (queueLen <= PREFETCH_THRESHOLD) {
+      logger.info('SCHEDULER', `Queue low (${queueLen} ≤ ${PREFETCH_THRESHOLD}), triggering prefetch`);
+      // Run async, don't block the current flow
+      this.autoRefillQueue().catch((err) =>
+        logger.warn('SCHEDULER', `Prefetch failed: ${err.message}`)
+      );
+      return true;
+    }
+    return false;
   }
 
   /**

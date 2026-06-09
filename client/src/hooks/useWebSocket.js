@@ -16,30 +16,45 @@ function useWebSocket() {
 
       // Handle now-playing events
       ws.on('now-playing', (data) => {
+        const store = useAppStore.getState();
+        const transitionStyle = data.transitionStyle || 'none';
+
         if (data.url) {
-          useAppStore.getState().playTrack(data.url, {
+          const trackInfo = {
             trackId: data.trackId,
             trackName: data.trackName || 'Unknown',
             artist: data.artist || 'Unknown',
             albumArt: data.albumArt || null,
-          });
+          };
+
+          if (data.ttsUrl && (transitionStyle === 'intro' || transitionStyle === 'outro')) {
+            // Intro/Outro mode: play song under DJ voice with ducking
+            store.playWithTTS(data.ttsUrl, data.url, trackInfo, transitionStyle);
+          } else {
+            // Direct play
+            store.playTrack(data.url, trackInfo);
+          }
         } else if (data.now_playing_track_id) {
-          useAppStore.getState().setCurrentTrack({
+          store.setCurrentTrack({
             trackId: data.now_playing_track_id,
             trackName: data.trackName || 'Unknown',
             artist: data.artist || 'Unknown',
             albumArt: data.albumArt || null,
+            transitionStyle,
           });
         }
         if (data.is_playing !== undefined) {
-          useAppStore.getState().setPlaying(Boolean(data.is_playing));
+          store.setPlaying(Boolean(data.is_playing));
         }
       });
 
-      // Handle DJ talk events (with optional TTS audio)
+      // Handle DJ talk events (with optional TTS audio + filler type)
       ws.on('dj-talk', (data) => {
         const store = useAppStore.getState();
         store.setDjMessage(data.text);
+        if (data.fillerType) {
+          store.setFillerType(data.fillerType);
+        }
         if (data.ttsUrl) {
           store.playTTS(data.ttsUrl);
         }

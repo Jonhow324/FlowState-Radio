@@ -10,7 +10,7 @@ const vectorStore = require('./services/vectorStore');
 const logger = require('./utils/logger');
 
 // Number of candidate songs to retrieve from vector store
-const CANDIDATE_COUNT = 20;
+const CANDIDATE_COUNT = 50;
 
 class Brain {
   constructor(config) {
@@ -205,7 +205,7 @@ class Brain {
       '严格返回 JSON 格式：',
       '{"say": "DJ串词(自然语言，可为null)", "songs": [{"name": "歌曲名", "artist": "歌手"}], "reason": "选歌理由", "segue": "过渡词(可为null)"}',
       '',
-      '从上面的候选歌曲列表中精选 3-5 首最适合当前场景的歌曲。',
+      '从上面的候选歌曲列表中精选 10-20 首最适合当前场景的歌曲。',
       'songs 数组中的 name 和 artist 必须与候选列表中的完全一致，不要编造新歌。',
       '根据当前时间、天气、用户心情和最近播放记录来决定最佳选择。',
       'say 字段为每首歌的电台串词，要自然融入当前环境信息。',
@@ -231,7 +231,7 @@ class Brain {
       '# 输出要求',
       '严格返回 JSON 格式：',
       '{"say": "DJ串词(自然语言，可为null)", "songs": [{"name": "歌曲名", "artist": "歌手"}], "reason": "选歌理由", "segue": "过渡词(可为null)"}',
-      'songs 数组中填入歌曲名称和歌手名，最多推荐 3-5 首。必须是真实存在的歌曲。',
+      'songs 数组中填入歌曲名称和歌手名，推荐 10-20 首。必须是真实存在的歌曲。',
       '根据用户的品味、当前环境、时间和记忆来选择最合适的音乐。',
       '注意：不要编造歌曲，请推荐你确认真实存在的歌曲。',
     ].join('\n');

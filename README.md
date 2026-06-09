@@ -21,7 +21,36 @@ NCM_COOKIE=xxx                   # NCM 登录 Cookie
 
 ```bash
 cd server && npm install
+cd ../client && npm install
 ```
+
+---
+
+## 启动服务
+
+需要同时运行后端和前端，开两个终端窗口：
+
+**终端 1 — 后端**（`localhost:8000`）
+
+```bash
+cd server
+npm run dev
+```
+
+使用 nodemon，修改代码自动重启。也可以用 `npm start` 跑纯 Node 不热重载。
+
+**终端 2 — 前端**（`localhost:5173`）
+
+```bash
+cd client
+npm run dev
+```
+
+Vite 开发服务器启动后，浏览器打开 `http://localhost:5173`。前端已配好 proxy，`/api`、`/stream`（WebSocket）、`/tts` 会自动转发到后端 8000 端口，无需额外配置。
+
+**验证后端就绪：** 访问 `http://localhost:8000/api/health` 可看到服务状态。
+
+**生产模式：** 前端先 `npm run build` 生成 `client/dist/`，后端 `index.js` 会自动托管该静态目录，只需启动后端即可。
 
 ---
 
@@ -174,7 +203,11 @@ claudio/
 ├── .env                          # 环境变量
 ├── data/
 │   └── vector-db.json            # 向量数据库（歌曲 + embedding + NCM 信息）
-├── server/
+├── client/                       # React 前端（Vite + Tailwind + PWA）
+│   ├── src/                      # 页面组件
+│   └── vite.config.js            # 开发代理配置（/api → :8000）
+├── server/                       # Express 后端
+│   ├── index.js                  # 入口 + 路由
 │   ├── config.js                 # 配置聚合
 │   ├── brain.js                  # 三层 RAG 大脑
 │   ├── context.js                # 上下文组装（天气/时间/记忆）
@@ -187,6 +220,6 @@ claudio/
 │   │   └── ncm.js                # NCM API 封装
 │   ├── api/
 │   │   └── chat.js               # 聊天 API（完整 RAG 管线）
-│   └── tests/                    # 单元测试
+│   └── tests/                    # 单元测试（vitest）
 └── README.md
 ```

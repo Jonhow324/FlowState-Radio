@@ -7,6 +7,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import fs from 'fs';
 import path from 'path';
+import crypto from 'crypto';
 
 // Silence console output during tests
 let consoleSpy;
@@ -106,6 +107,12 @@ function isDataRow(line, delimiter) {
 
 function defaultColumnMapping() {
   return { index: 0, name: 1, artist: 2, tags: 3, mood: 4, rating: 5 };
+}
+
+function generateSongId(song) {
+  const key = `${song.name.trim()}---${song.artist.trim()}`.toLowerCase();
+  const hash = crypto.createHash('md5').update(key).digest('hex').slice(0, 12);
+  return `song:${hash}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -483,6 +490,109 @@ describe('Ingest Parser', () => {
       expect(isDataRow(lines[0], ',')).toBe(true);
       const fields = parseLine(lines[0], ',');
       expect(fields[1]).toBe('晴天');
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  describe('generateSongId()', () => {
+    it('returns a stable hash-based ID for the same song', () => {
+      const song = { name: '晴天', artist: '周杰伦' };
+      const id1 = generateSongId(song);
+      const id2 = generateSongId(song);
+      expect(id1).toBe(id2);
+    });
+
+    it('returns different IDs for different songs', () => {
+      const song1 = { name: '晴天', artist: '周杰伦' };
+      const song2 = { name: '稻香', artist: '周杰伦' };
+      expect(generateSongId(song1)).not.toBe(generateSongId(song2));
+    });
+
+    it('returns different IDs for same name but different artist', () => {
+      const song1 = { name: 'Hello', artist: 'Adele' };
+      const song2 = { name: 'Hello', artist: 'Martin' };
+      expect(generateSongId(song1)).not.toBe(generateSongId(song2));
+    });
+
+    it('is case-insensitive', () => {
+      const song1 = { name: 'Hello', artist: 'Adele' };
+      const song2 = { name: 'hello', artist: 'adele' };
+      expect(generateSongId(song1)).toBe(generateSongId(song2));
+    });
+
+    it('trims whitespace', () => {
+      const song1 = { name: '  Hello  ', artist: '  Adele  ' };
+      const song2 = { name: 'Hello', artist: 'Adele' };
+      expect(generateSongId(song1)).toBe(generateSongId(song2));
+    });
+
+    it('returns ID in song:<12-hex-chars> format', () => {
+      const id = generateSongId({ name: 'Test', artist: 'Art' });
+      expect(id).toMatch(/^song:[0-9a-f]{12}$/);
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  describe('Merge logic (deduplication by hash ID)', () => {
+    it('filters out songs whose hash ID already exists in the store', () => {
+      // Simulate existing store with 2 songs
+      const existingSongs = [
+        { name: '晴天', artist: '周杰伦' },
+        { name: '稻香', artist: '周杰伦' },
+      ];
+      const existingIds = new Set(existingSongs.map(s => generateSongId(s)));
+
+      // New CSV has 3 songs: 2 overlap + 1 new
+      const newSongs = [
+        { name: '晴天', artist: '周杰伦' },
+        { name: '稻香', artist: '周杰伦' },
+        { name: '七里香', artist: '周杰伦' },
+      ].map(s => ({ ...s, hashId: generateSongId(s) }));
+
+      const songsToProcess = newSongs.filter(s => !existingIds.has(s.hashId));
+
+      expect(songsToProcess).toHaveLength(1);
+      expect(songsToProcess[0].name).toBe('七里香');
+    });
+
+    it('keeps all songs when store is empty', () => {
+      const existingIds = new Set();
+
+      const newSongs = [
+        { name: 'Song A', artist: 'Art A' },
+        { name: 'Song B', artist: 'Art B' },
+      ].map(s => ({ ...s, hashId: generateSongId(s) }));
+
+      const songsToProcess = newSongs.filter(s => !existingIds.has(s.hashId));
+      expect(songsToProcess).toHaveLength(2);
+    });
+
+    it('skips all songs when all already exist', () => {
+      const existingSongs = [
+        { name: 'Song A', artist: 'Art A' },
+        { name: 'Song B', artist: 'Art B' },
+      ];
+      const existingIds = new Set(existingSongs.map(s => generateSongId(s)));
+
+      const newSongs = [
+        { name: 'Song A', artist: 'Art A' },
+        { name: 'Song B', artist: 'Art B' },
+      ].map(s => ({ ...s, hashId: generateSongId(s) }));
+
+      const songsToProcess = newSongs.filter(s => !existingIds.has(s.hashId));
+      expect(songsToProcess).toHaveLength(0);
+    });
+
+    it('treats songs from different CSVs with same name+artist as duplicates', () => {
+      // CSV 1 was imported earlier
+      const csv1Song = { name: 'Bohemian Rhapsody', artist: 'Queen' };
+      const existingIds = new Set([generateSongId(csv1Song)]);
+
+      // CSV 2 has the same song (maybe from a different playlist)
+      const csv2Song = { name: 'Bohemian Rhapsody', artist: 'Queen' };
+      const hashId = generateSongId(csv2Song);
+
+      expect(existingIds.has(hashId)).toBe(true);
     });
   });
 });

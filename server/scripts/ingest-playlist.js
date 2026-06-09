@@ -8,6 +8,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 // Must be required after dotenv setup
 require('dotenv').config({ path: path.resolve(__dirname, '../../.env') });
@@ -108,6 +109,17 @@ function defaultColumnMapping() {
 }
 
 /**
+ * Generate a stable content-hash ID for a song
+ * Based on name + artist so the same song always gets the same ID
+ * regardless of which CSV it came from or its position
+ */
+function generateSongId(song) {
+  const key = `${song.name.trim()}---${song.artist.trim()}`.toLowerCase();
+  const hash = crypto.createHash('md5').update(key).digest('hex').slice(0, 12);
+  return `song:${hash}`;
+}
+
+/**
  * Parse the full CSV/TSV file
  * Supports both header-row and headerless formats.
  */
@@ -197,13 +209,16 @@ async function main() {
     console.log('  序号 | 歌名 | 歌手 | 风格标签 | 核心歌词大意/情感基调 | 个人评分/听歌频率');
     console.log('');
     console.log('Options:');
-    console.log('  --dry-run    Parse and show results without calling embedding API');
-    console.log('  --resolve    Also resolve NCM track IDs for each song (slower)');
+    console.log('  --dry-run      Parse and show results without calling embedding API');
+    console.log('  --resolve      Also resolve NCM track IDs for each song (slower)');
+    console.log('  --merge        Append to existing DB, skip songs already present (by content hash)');
+    console.log('                 Without --merge, the DB is cleared before import (replace mode)');
     process.exit(1);
   }
 
   const dryRun = process.argv.includes('--dry-run');
   const resolve = process.argv.includes('--resolve');
+  const merge = process.argv.includes('--merge');
   const resolvedPath = path.resolve(filePath);
 
   if (!fs.existsSync(resolvedPath)) {
@@ -239,17 +254,50 @@ async function main() {
   // Load existing vector store
   vectorStore.load();
 
-  // Build embedding texts
-  const embeddingTexts = songs.map(buildEmbeddingText);
+  const mode = merge ? 'MERGE' : 'REPLACE';
+  logger.info('INGEST', `Mode: ${mode}`);
+
+  // Assign content-hash IDs to all parsed songs
+  const allSongs = songs.map(song => ({ ...song, hashId: generateSongId(song) }));
+
+  let songsToProcess;
+
+  if (merge) {
+    // In merge mode, skip songs whose hash ID already exists in the store
+    const existingIds = new Set(vectorStore.listMetadata().map(item => item.id));
+    songsToProcess = allSongs.filter(song => !existingIds.has(song.hashId));
+
+    const skippedCount = allSongs.length - songsToProcess.length;
+    if (skippedCount > 0) {
+      logger.info('INGEST', `Merge: skipping ${skippedCount} songs already in DB`);
+    }
+    logger.info('INGEST', `Merge: ${songsToProcess.length} new songs to ingest (existing DB has ${vectorStore.size()} items)`);
+
+    if (songsToProcess.length === 0) {
+      logger.info('INGEST', 'No new songs to add. Done.');
+      return;
+    }
+  } else {
+    // Replace mode: clear existing data first
+    const prevCount = vectorStore.size();
+    if (prevCount > 0) {
+      logger.info('INGEST', `Replace mode: clearing ${prevCount} existing items`);
+      vectorStore.clear();
+    }
+    songsToProcess = allSongs;
+  }
+
+  // Build embedding texts only for songs we need to process
+  const embeddingTexts = songsToProcess.map(s => buildEmbeddingText(s));
 
   // Batch embed
-  logger.info('INGEST', `Embedding ${songs.length} songs via DashScope ${embedding.model}...`);
+  logger.info('INGEST', `Embedding ${songsToProcess.length} songs via DashScope ${embedding.model}...`);
   const vectors = await embedding.embedBatch(embeddingTexts);
   logger.info('INGEST', `Got ${vectors.length} embedding vectors (${vectors[0]?.length || 0}d)`);
 
   // Store in vector database
-  const items = songs.map((song, i) => ({
-    id: `song:${song.index || i + 1}`,
+  const items = songsToProcess.map((song, i) => ({
+    id: song.hashId,
     metadata: {
       name: song.name,
       artist: song.artist,
@@ -306,12 +354,11 @@ async function main() {
   vectorStore.save();
 
   // Summary
-  logger.info('INGEST', `Ingestion complete: ${songs.length} songs stored in vector DB`);
+  logger.info('INGEST', `Ingestion complete: ${items.length} songs added, total DB size: ${vectorStore.size()}`);
 
-  // Quick self-test: search for a known song
+  // Quick self-test: search for the first newly added song
   if (vectors.length > 0) {
-    const testQuery = embeddingTexts[0];
-    logger.info('INGEST', `Self-test: searching for "${songs[0].name}"...`);
+    logger.info('INGEST', `Self-test: searching for "${songsToProcess[0].name}"...`);
     const results = vectorStore.search(vectors[0], 5);
     console.log('\n── Self-test Results ──');
     results.forEach((r, i) => {

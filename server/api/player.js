@@ -112,11 +112,22 @@ router.post('/play', async (req, res) => {
         artist: meta?.artist || next.artist,
       };
 
-      // ── Filler / Transition Logic ────────────────────────────
+      // ── Segment / Filler Transition Logic ────────────────────
       let transitionStyle = next.transitionStyle || meta?.transitionStyle || 'outro';
       let fillerData = null;
 
-      if (filler.shouldInsertFiller(scheduler._consecutivePlays)) {
+      // Check for pre-generated bridge segment first
+      const queueSegs = state.getAllSegments();
+      let queueBridgeSeg = null;
+      if (queueSegs.length > 0) {
+        queueBridgeSeg = queueSegs.find(s => s.type === 'bridge' && s.ttsStatus === 'ready');
+      }
+
+      if (queueBridgeSeg && queueBridgeSeg.ttsUrl) {
+        state.removeSegment(`${queueBridgeSeg.position}:${queueBridgeSeg.anchorTrackIndex}`);
+        fillerData = { text: queueBridgeSeg.text, ttsUrl: queueBridgeSeg.ttsUrl, type: 'bridge' };
+        transitionStyle = queueBridgeSeg.transitionStyle || 'intro';
+      } else if (filler.shouldInsertFiller(scheduler._consecutivePlays)) {
         try {
           fillerData = await scheduler.generateTransition(prevForQueueNext, nextSongInfo, { silent: true });
           if (fillerData?.ttsUrl) {
@@ -220,15 +231,26 @@ router.post('/skip', async (req, res) => {
         artist: meta?.artist || next.artist,
       };
 
-      // ── Filler / Transition Logic ────────────────────────────
+      // ── Segment / Filler Transition Logic ────────────────────
       let transitionStyle = next.transitionStyle || meta?.transitionStyle || 'outro';
       let fillerData = null;
 
-      if (filler.shouldInsertFiller(scheduler._consecutivePlays)) {
-        // Generate filler DJ talk (TTS + broadcast dj-talk event)
+      // Check for pre-generated bridge segment first
+      const allSegs = state.getAllSegments();
+      let bridgeSeg = null;
+      if (allSegs.length > 0) {
+        bridgeSeg = allSegs.find(s => s.type === 'bridge' && s.ttsStatus === 'ready');
+      }
+
+      if (bridgeSeg && bridgeSeg.ttsUrl) {
+        // Use pre-generated bridge segment and mark as consumed
+        state.removeSegment(`${bridgeSeg.position}:${bridgeSeg.anchorTrackIndex}`);
+        fillerData = { text: bridgeSeg.text, ttsUrl: bridgeSeg.ttsUrl, type: 'bridge' };
+        transitionStyle = bridgeSeg.transitionStyle || 'intro';
+      } else if (filler.shouldInsertFiller(scheduler._consecutivePlays)) {
+        // Fall back to ad-hoc filler generation
         try {
           fillerData = await scheduler.generateTransition(prevSong, nextSongInfo, { silent: true });
-          // If filler has TTS, use intro mode so DJ talks over the new song's intro
           if (fillerData?.ttsUrl) {
             transitionStyle = 'intro';
           }
@@ -236,7 +258,6 @@ router.post('/skip', async (req, res) => {
           logger.warn('PLAYER', `Filler generation failed: ${err.message}`);
         }
       } else {
-        // Increment counter when no filler inserted
         scheduler._consecutivePlays++;
       }
 

@@ -234,6 +234,85 @@ Brain 在 Layer 3 选歌时会为每首歌标注 `transition_style`（`intro` / 
 
 ---
 
+## Segment 驱动广播架构
+
+在 Filler 转场系统之上，引入了结构化的 **Segment 驱动广播**机制。Brain 在 Layer 3 选歌时不仅输出歌曲列表，还同时输出一组 Segment 编排指令，描述歌曲之间的衔接方式。NCM 确认歌曲后，系统异步生成 bridge Segment 的 TTS 音频，并在播放时优先使用预生成的 Segment，Filler 模板系统作为兜底。
+
+### Segment 类型
+
+| 类型 | 说明 | 典型位置 |
+|------|------|----------|
+| `cold_open` | 开场白，第一首歌之前的 DJ 独白 | `before_track` |
+| `bridge` | 歌曲间的过渡串词（异步后生成） | `between_tracks` |
+| `back_announce` | 歌曲结束后的回顾点评 | `after_track` |
+| `quick_touch` | 简短评论或轻量过渡 | 任意 |
+| `silence` | 刻意留白，不生成 TTS | 任意 |
+
+### 生成流程
+
+```
+Brain (Layer 3)
+  ├── 输出 songs[] + segments[]（LLM 原始编排）
+  │
+  ▼
+NCM 解析（确认歌曲真实存在）
+  │
+  ├── normalizeSegments()     ← 严格校验 LLM 输出（类型白名单 / 索引钳位 / 位置默认值）
+  ├── buildSegmentMap()       ← 存入 state._segmentMap（O(1) 查找）
+  │
+  └── 异步 bridge 后生成      ← 遍历相邻歌曲对，generateBridgeText() + resolveSegmentTTS()
+                                 每完成一个 bridge 广播 segment-ready 事件
+```
+
+Bridge 采用异步后生成而非 LLM 直接输出，是因为 LLM 在选歌阶段可能产生幻觉（虚构歌名 / 歌手），只有 NCM 确认后的真实元数据才能用于生成准确的过渡文案。
+
+### 播放优先级
+
+切歌时（`player.js` 的 `/skip` 和 `/play`），系统按以下优先级决定转场内容：
+
+1. **预生成的 bridge Segment**（`state.getAllSegments()` 中 `type === 'bridge' && ttsStatus === 'ready'`）
+2. **Filler 模板系统**（`filler.shouldInsertFiller()` 达到阈值时触发）
+3. **直接切换**（无转场内容）
+
+Segment 被消费后会从 `_segmentMap` 中移除，防止重复播放。
+
+### 四层去重状态机
+
+`segmentEngine.dedupCheck()` 实现了四层去重检查，防止选歌重复：
+
+| 层级 | 检查范围 | 说明 |
+|------|----------|------|
+| L1 | 当前批次（batchIds） | 同一次 AI 推荐中不出现重复歌曲 |
+| L2 | 播放队列（queueIds） | 已在队列中的歌曲不再添加 |
+| L3 | 24 小时冷却（recentPlays） | 24 小时内播放过的歌曲不再推荐 |
+| L4 | 艺人过度曝光（最近 5 首） | 同一艺人在最近 5 首播放中出现过则排除 |
+
+### WebSocket 事件
+
+| 事件 | 数据 | 触发时机 |
+|------|------|----------|
+| `segment-ready` | Segment 对象（含 ttsUrl） | bridge 后生成完成 / cold_open 解析完成 |
+| `now-playing` + `coldOpen` | 附加 cold_open Segment | AI 推荐第一首歌时 |
+| `now-playing` + `ttsUrl` + `fillerType: 'bridge'` | bridge Segment 嵌入 | 切歌时使用预生成 bridge |
+
+前端 `appStore` 维护 `pendingSegments` 数组，收到 `segment-ready` 事件时存入。歌曲播完后检查是否有 `afterTrack` Segment（back_announce），如有则先播放点评再切歌。
+
+### 相关文件
+
+| 文件 | 职责 |
+|------|------|
+| `server/services/segmentEngine.js` | Segment 引擎：归一化 / bridge 生成 / 去重 / Map 构建 |
+| `server/state.js` | Segment 内存存储（`_segmentMap`）+ `getRecentPlaysForDedup` |
+| `server/brain.js` | Layer 3 prompt 输出 `segments[]` 编排指令 |
+| `server/api/chat.js` | AI 管线集成：归一化 → 存储 → 异步 bridge → cold_open |
+| `server/api/player.js` | 切歌时优先查询 bridge Segment |
+| `server/scheduler.js` | autoRefillQueue 异步生成 bridge Segment |
+| `client/src/hooks/useWebSocket.js` | 处理 `segment-ready` 事件 |
+| `client/src/stores/appStore.js` | `pendingSegments` 状态 + afterTrack 播放 |
+| `server/tests/segment.test.js` | 40 个单元测试覆盖核心逻辑 |
+
+---
+
 ## 运行测试
 
 ```bash
@@ -268,6 +347,7 @@ flowstate-radio/
 │   │   ├── ingest-playlist.js    # 歌单导入脚本
 │   │   └── resolve-ncm.js       # NCM trackId 匹配脚本
 │   ├── services/
+│   │   ├── segmentEngine.js     # Segment 引擎（归一化 / bridge / 去重）
 │   │   ├── embedding.js          # DashScope embedding 服务
 │   │   ├── filler.js             # Filler 转场 DJ 话术模板
 │   │   ├── vectorStore.js        # 向量存储 + 余弦相似度搜索

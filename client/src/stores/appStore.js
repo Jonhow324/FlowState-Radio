@@ -83,8 +83,11 @@ const useAppStore = create((set, get) => ({
   djMessage: null,
   isSpeaking: false, // Whether TTS is currently playing
   isDucking: false,  // Whether music is currently ducked for DJ voice
-  lastFillerType: null, // 'gap' | 'stretch' | 'transition' | 'weather'
+  lastFillerType: null, // 'gap' | 'stretch' | 'transition' | 'weather' | 'bridge'
   transitionStyle: 'none', // 'intro' | 'outro' | 'none'
+
+  // Segments (Phase 1: bridge + cold_open storage; Phase 2: afterTrack playback)
+  pendingSegments: [],
 
   // Queue
   queue: [],
@@ -101,9 +104,21 @@ const useAppStore = create((set, get) => ({
       set({ progress: audio.currentTime, duration: audio.duration || 0 });
     });
 
-    // Auto-skip when song ends
+    // Auto-skip when song ends (with optional afterTrack segment)
     audio.addEventListener('ended', () => {
-      get().skipNext();
+      const afterSeg = get().getAfterTrackSegment();
+      if (afterSeg && afterSeg.ttsUrl) {
+        // Phase 2: Play back_announce / afterTrack commentary, then skip
+        get().playTTS(afterSeg.ttsUrl);
+        get().removeSegment(afterSeg.id);
+        const onAfterEnded = () => {
+          ttsAudio.removeEventListener('ended', onAfterEnded);
+          get().skipNext();
+        };
+        ttsAudio.addEventListener('ended', onAfterEnded);
+      } else {
+        get().skipNext();
+      }
     });
 
     // Handle play/pause state
@@ -379,6 +394,40 @@ const useAppStore = create((set, get) => ({
   setQueue: (queue) => set({ queue }),
   setCurrentTrack: (track) => set({ currentTrack: track }),
   setPlaying: (playing) => set({ isPlaying: playing }),
+
+  // ── Segment Actions (Phase 1) ──────────────────────────────
+  /**
+   * Store a segment received via WebSocket.
+   * Segments are kept in memory for later playback (bridge, afterTrack, etc.)
+   */
+  addPendingSegment: (segment) => {
+    const { pendingSegments } = get();
+    // Avoid duplicates by segment id
+    const exists = pendingSegments.some(s => s.id === segment.id);
+    if (!exists) {
+      set({ pendingSegments: [...pendingSegments, segment] });
+    }
+  },
+
+  /**
+   * Find an afterTrack / back_announce segment with ready TTS.
+   * Used on audio 'ended' to decide whether to play commentary before skipping.
+   * Returns the segment or null.
+   */
+  getAfterTrackSegment: () => {
+    const { pendingSegments } = get();
+    return pendingSegments.find(
+      s => (s.position === 'after_track' || s.type === 'back_announce') && s.ttsUrl && s.ttsStatus === 'ready'
+    ) || null;
+  },
+
+  /**
+   * Remove a segment by id (after it's been consumed).
+   */
+  removeSegment: (segmentId) => {
+    const { pendingSegments } = get();
+    set({ pendingSegments: pendingSegments.filter(s => s.id !== segmentId) });
+  },
 
   /**
    * Refresh queue from server

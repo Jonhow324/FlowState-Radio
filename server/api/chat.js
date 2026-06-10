@@ -13,6 +13,7 @@ const logger = require('../utils/logger');
 const tts = require('../tts');
 const scheduler = require('../scheduler');
 const filler = require('../services/filler');
+const segmentEngine = require('../services/segmentEngine');
 
 // Singleton brain instance
 const brain = new Brain(config);
@@ -85,8 +86,21 @@ router.post('/', async (req, res) => {
                 const fallbackMeta = state.getTrackMeta(fallback.track_id);
                 const nextSong = { name: fallbackMeta?.track_name || fallback.track_name, artist: fallbackMeta?.artist || fallback.artist };
 
-                // Check if filler is needed
-                if (scheduler.shouldInsertFiller && filler.shouldInsertFiller(scheduler._consecutivePlays)) {
+                // Check segments first, then fall back to filler
+                const fbSegs = state.getAllSegments();
+                let fbTransitionSeg = null;
+                let fbSegKey = null;
+                if (fbSegs.length > 0) {
+                  const bridgeSegs = fbSegs.filter(s => s.type === 'bridge' && s.ttsStatus === 'ready');
+                  if (bridgeSegs.length > 0) {
+                    fbTransitionSeg = bridgeSegs[0];
+                    fbSegKey = `${fbTransitionSeg.position}:${fbTransitionSeg.anchorTrackIndex}`;
+                  }
+                }
+                if (fbTransitionSeg) {
+                  state.removeSegment(fbSegKey);
+                }
+                if (!fbTransitionSeg && filler.shouldInsertFiller(scheduler._consecutivePlays)) {
                   scheduler.generateTransition(prevSong, nextSong).catch(() => {});
                 }
 
@@ -96,17 +110,21 @@ router.post('/', async (req, res) => {
                   is_playing: true,
                 });
                 if (broadcast) {
-                  broadcast({
-                    type: 'now-playing',
-                    data: {
-                      trackId: fallback.track_id,
-                      trackName: fallbackMeta?.track_name || fallback.track_name,
-                      artist: fallbackMeta?.artist || fallback.artist,
-                      albumArt: fallbackMeta?.album_art || null,
-                      url: fallbackUrl,
-                      transitionStyle: fallback.transitionStyle || 'outro',
-                    },
-                  });
+                  const fbNowPlayData = {
+                    trackId: fallback.track_id,
+                    trackName: fallbackMeta?.track_name || fallback.track_name,
+                    artist: fallbackMeta?.artist || fallback.artist,
+                    albumArt: fallbackMeta?.album_art || null,
+                    url: fallbackUrl,
+                    transitionStyle: fallback.transitionStyle || 'outro',
+                  };
+                  if (fbTransitionSeg && fbTransitionSeg.ttsUrl) {
+                    fbNowPlayData.ttsUrl = fbTransitionSeg.ttsUrl;
+                    fbNowPlayData.fillerText = fbTransitionSeg.text;
+                    fbNowPlayData.fillerType = 'bridge';
+                    fbNowPlayData.transitionStyle = fbTransitionSeg.transitionStyle || 'intro';
+                  }
+                  broadcast({ type: 'now-playing', data: fbNowPlayData });
                 }
 
                 // Rolling queue check
@@ -132,8 +150,26 @@ router.post('/', async (req, res) => {
           const meta = state.getTrackMeta(next.track_id);
           const nextSong = { name: meta?.track_name || next.track_name, artist: meta?.artist || next.artist };
 
-          // Check if filler is needed between songs
-          if (filler.shouldInsertFiller(scheduler._consecutivePlays)) {
+          // ── Segment / Filler Transition Logic ─────────────────
+          const allSegs = state.getAllSegments();
+          const hasSegments = allSegs.length > 0;
+          let transitionSeg = null;
+          let consumedSegKey = null;
+
+          if (hasSegments) {
+            // Prefer pre-generated bridge segment over ad-hoc filler
+            const bridgeSegs = allSegs.filter(s => s.type === 'bridge' && s.ttsStatus === 'ready');
+            if (bridgeSegs.length > 0) {
+              transitionSeg = bridgeSegs[0];
+              consumedSegKey = `${transitionSeg.position}:${transitionSeg.anchorTrackIndex}`;
+            }
+          }
+
+          if (transitionSeg) {
+            state.removeSegment(consumedSegKey);
+          }
+
+          if (!transitionSeg && filler.shouldInsertFiller(scheduler._consecutivePlays)) {
             scheduler.generateTransition(prevSong, nextSong).catch(() => {});
           }
 
@@ -147,17 +183,22 @@ router.post('/', async (req, res) => {
           scheduler.checkAndPrefetch().catch(() => {});
 
           if (broadcast) {
-            broadcast({
-              type: 'now-playing',
-              data: {
-                trackId: next.track_id,
-                trackName: meta?.track_name || next.track_name,
-                artist: meta?.artist || next.artist,
-                albumArt: meta?.album_art || null,
-                url,
-                transitionStyle: next.transitionStyle || 'outro',
-              },
-            });
+            const nowPlayData = {
+              trackId: next.track_id,
+              trackName: meta?.track_name || next.track_name,
+              artist: meta?.artist || next.artist,
+              albumArt: meta?.album_art || null,
+              url,
+              transitionStyle: next.transitionStyle || 'outro',
+            };
+            // Attach pre-generated bridge segment if available
+            if (transitionSeg && transitionSeg.ttsUrl) {
+              nowPlayData.ttsUrl = transitionSeg.ttsUrl;
+              nowPlayData.fillerText = transitionSeg.text;
+              nowPlayData.fillerType = 'bridge';
+              nowPlayData.transitionStyle = transitionSeg.transitionStyle || 'intro';
+            }
+            broadcast({ type: 'now-playing', data: nowPlayData });
           }
           return res.json({
             say: null,
@@ -363,6 +404,44 @@ router.post('/', async (req, res) => {
           // Add all to queue
           state.addToQueue(resolvedTracks, aiResult.source, aiResult.reason);
 
+          // ── Segment Processing (Phase 1) ────────────────────────
+          // After NCM confirms tracks, normalize LLM segments and generate bridges.
+          let normalizedSegments = [];
+          if (aiResult.segments && Array.isArray(aiResult.segments) && resolvedTracks.length > 0) {
+            normalizedSegments = segmentEngine.normalizeSegments(
+              aiResult.segments,
+              resolvedTracks.map(t => ({ name: t.trackName || t.name, artist: t.artist }))
+            );
+            const segMap = segmentEngine.buildSegmentMap(normalizedSegments);
+            state.setSegments(segMap);
+            logger.info('CHAT', `Segments normalized: ${normalizedSegments.length} (${normalizedSegments.map(s => s.type).join(', ')})`);
+
+            // Async bridge post-generation between adjacent confirmed tracks
+            if (broadcast) {
+              (async () => {
+                for (let i = 0; i < resolvedTracks.length - 1; i++) {
+                  const prev = { name: resolvedTracks[i].trackName || resolvedTracks[i].name, artist: resolvedTracks[i].artist };
+                  const next = { name: resolvedTracks[i + 1].trackName || resolvedTracks[i + 1].name, artist: resolvedTracks[i + 1].artist };
+                  const bridgeInfo = segmentEngine.generateBridgeText(prev, next);
+                  const bridgeSeg = {
+                    id: `seg:bridge:${i}:post`,
+                    type: 'bridge',
+                    position: 'between_tracks',
+                    anchorTrackIndex: i,
+                    text: bridgeInfo.text,
+                    ttsUrl: null,
+                    ttsStatus: 'pending',
+                    transitionStyle: bridgeInfo.transitionStyle,
+                    metadata: { prevSong: prev, nextSong: next },
+                  };
+                  await segmentEngine.resolveSegmentTTS(bridgeSeg);
+                  state.addSegment(`between_tracks:${i}`, bridgeSeg);
+                  broadcast({ type: 'segment-ready', data: bridgeSeg });
+                }
+              })().catch(err => logger.warn('CHAT', `Bridge generation failed: ${err.message}`));
+            }
+          }
+
           // Play the first one immediately
           const first = state.shiftQueue();
           if (first) {
@@ -392,7 +471,23 @@ router.post('/', async (req, res) => {
                 transitionStyle,
               };
 
+              // Resolve cold_open segment (opening narration before first song)
+              let coldOpenSeg = null;
+              if (normalizedSegments.length > 0) {
+                coldOpenSeg = normalizedSegments.find(s => s.type === 'cold_open');
+                if (coldOpenSeg && coldOpenSeg.text) {
+                  await segmentEngine.resolveSegmentTTS(coldOpenSeg);
+                  state.addSegment(`before_track:0`, coldOpenSeg);
+                }
+              }
+
               if (broadcast) {
+                // Broadcast cold_open segment if available
+                if (coldOpenSeg && coldOpenSeg.ttsUrl) {
+                  broadcast({ type: 'segment-ready', data: coldOpenSeg });
+                  nowPlaying.coldOpen = coldOpenSeg;
+                }
+
                 // Push DJ talk first if AI has something to say (with TTS)
                 if (aiResult.say) {
                   // AI is talking — reset the filler counter

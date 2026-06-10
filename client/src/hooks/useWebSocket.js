@@ -27,6 +27,11 @@ function useWebSocket() {
             albumArt: data.albumArt || null,
           };
 
+          // Handle cold_open segment (opening narration before first song)
+          if (data.coldOpen) {
+            store.addPendingSegment(data.coldOpen);
+          }
+
           if (data.ttsUrl && (transitionStyle === 'intro' || transitionStyle === 'outro')) {
             // Intro/Outro mode: play song under DJ voice with ducking
             if (data.fillerType) store.setFillerType(data.fillerType);
@@ -58,6 +63,16 @@ function useWebSocket() {
         }
         if (data.ttsUrl) {
           store.playTTS(data.ttsUrl);
+        }
+      });
+
+      // Handle segment-ready events (bridge / back_announce / cold_open segments)
+      ws.on('segment-ready', (data) => {
+        const store = useAppStore.getState();
+        store.addPendingSegment(data);
+        // Show segment text as DJ message in the chat UI
+        if (data.text) {
+          store.setDjMessage(data.text);
         }
       });
 

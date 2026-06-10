@@ -481,6 +481,59 @@ function updateCurrentState(partial) {
   return getCurrentState();
 }
 
+// ===== Segment Storage (in-memory) =====
+// Segments are transient broadcast data — not persisted to SQLite.
+// Keyed by "position:anchorIndex" for O(1) lookup during playback.
+
+const _segmentMap = new Map();
+
+function setSegments(segmentMap) {
+  _segmentMap.clear();
+  if (segmentMap instanceof Map) {
+    for (const [k, v] of segmentMap) _segmentMap.set(k, v);
+  }
+}
+
+function addSegment(key, segment) {
+  _segmentMap.set(key, segment);
+}
+
+function removeSegment(key) {
+  _segmentMap.delete(key);
+}
+
+function getSegment(key) {
+  return _segmentMap.get(key) || null;
+}
+
+function getSegmentsForTrack(trackIndex) {
+  const coldOpenKey = `before_track:${trackIndex}`;
+  const bridgeKey = `between_tracks:${trackIndex - 1}`;
+  const afterKey = `after_track:${trackIndex}`;
+
+  return {
+    beforeTrack: _segmentMap.get(coldOpenKey) || _segmentMap.get(bridgeKey) || null,
+    afterTrack: _segmentMap.get(afterKey) || null,
+  };
+}
+
+function clearSegments() {
+  _segmentMap.clear();
+}
+
+function getAllSegments() {
+  return Array.from(_segmentMap.values());
+}
+
+// ===== Recent Plays for Dedup (L3/L4) =====
+
+function getRecentPlaysForDedup(limit = 50) {
+  return queryAll(
+    'SELECT track_id AS trackId, artist, played_at AS playedAt FROM plays ORDER BY played_at DESC LIMIT ?',
+    [limit]
+  );
+}
+
 module.exports = {
   initDatabase,
   logPlay,
@@ -506,4 +559,12 @@ module.exports = {
   getCurrentState,
   updateCurrentState,
   saveDbSync,
+  setSegments,
+  addSegment,
+  removeSegment,
+  getSegment,
+  getSegmentsForTrack,
+  clearSegments,
+  getAllSegments,
+  getRecentPlaysForDedup,
 };

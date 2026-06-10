@@ -9,6 +9,7 @@ const state = require('./state');
 const ncm = require('./services/ncm');
 const tts = require('./tts');
 const filler = require('./services/filler');
+const segmentEngine = require('./services/segmentEngine');
 const config = require('./config');
 const logger = require('./utils/logger');
 
@@ -25,6 +26,7 @@ class Scheduler {
     this._consecutivePlays = 0;    // Tracks songs played without DJ talk
     this._prefetching = false;     // Prevent concurrent prefetch requests
     this._lastWeather = null;      // Cache for weather-based fillers
+    this._refillBatch = 0;         // Counter for unique bridge segment keys
   }
 
   /**
@@ -360,6 +362,32 @@ class Scheduler {
             type: 'queue-update',
             data: { queue: state.getQueue() },
           });
+
+          // ── Segment Bridge Post-Generation ───────────────────────
+          // Generate bridge segments between adjacent newly-queued tracks
+          this._refillBatch++;
+          const batchId = this._refillBatch;
+          (async () => {
+            for (let i = 0; i < resolvedTracks.length - 1; i++) {
+              const prev = { name: resolvedTracks[i].trackName || resolvedTracks[i].name, artist: resolvedTracks[i].artist };
+              const next = { name: resolvedTracks[i + 1].trackName || resolvedTracks[i + 1].name, artist: resolvedTracks[i + 1].artist };
+              const bridgeInfo = segmentEngine.generateBridgeText(prev, next);
+              const bridgeSeg = {
+                id: `seg:bridge:refill:${i}`,
+                type: 'bridge',
+                position: 'between_tracks',
+                anchorTrackIndex: i,
+                text: bridgeInfo.text,
+                ttsUrl: null,
+                ttsStatus: 'pending',
+                transitionStyle: bridgeInfo.transitionStyle,
+                metadata: { prevSong: prev, nextSong: next },
+              };
+              await segmentEngine.resolveSegmentTTS(bridgeSeg);
+              state.addSegment(`between_tracks:refill:${batchId}:${i}`, bridgeSeg);
+              this.broadcast({ type: 'segment-ready', data: bridgeSeg });
+            }
+          })().catch(err => logger.warn('SCHEDULER', `Refill bridge generation failed: ${err.message}`));
         }
       } else {
         logger.warn('SCHEDULER', 'Rolling queue refill: no tracks resolved');

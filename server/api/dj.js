@@ -11,17 +11,17 @@ const logger = require('../utils/logger');
 const DJ_PROFILES = {
   zh: {
     id: 'zh',
-    name: 'Claudio',
+    name: 'FlowState',
     language: 'zh',
     description: '中文电台 · 温暖亲切',
-    welcomeMessage: '嘿！我是 Claudio，你的专属中文电台 DJ。切换成功，接下来让我为你选歌吧。',
+    welcomeMessage: '嘿！我是 FlowState，你的专属中文电台 DJ。切换成功，接下来让我为你选歌吧。',
   },
   en: {
     id: 'en',
-    name: 'DJ Claudio',
+    name: 'DJ FlowState',
     language: 'en',
     description: 'English Radio · Cool & Smooth',
-    welcomeMessage: "Hey there! DJ Claudio here, your smooth English radio host. Switch complete — let's get the music going.",
+    welcomeMessage: "Hey there! DJ FlowState here, your smooth English radio host. Switch complete — let's get the music going.",
   },
 };
 

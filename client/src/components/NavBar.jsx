@@ -22,12 +22,12 @@ function NavBar({ activeView, onViewChange }) {
                 {isActive && (
                   <motion.div
                     layoutId="nav-indicator"
-                    className="absolute -top-3 w-8 h-0.5 bg-claudio-400 rounded-full"
+                    className="absolute -top-3 w-8 h-0.5 bg-flowstate-400 rounded-full"
                     transition={{ type: 'spring', stiffness: 350, damping: 30 }}
                   />
                 )}
                 <Icon active={isActive} />
-                <span className={`text-xs ${isActive ? 'text-claudio-400' : 'text-white/40'}`}>
+                <span className={`text-xs ${isActive ? 'text-flowstate-400' : 'text-white/40'}`}>
                   {label}
                 </span>
               </button>
@@ -52,7 +52,7 @@ function PlayerIcon({ active }) {
       strokeWidth="2"
       strokeLinecap="round"
       strokeLinejoin="round"
-      className={active ? 'text-claudio-400' : 'text-white/40'}
+      className={active ? 'text-flowstate-400' : 'text-white/40'}
     >
       <circle cx="12" cy="12" r="10" />
       <polygon points="10 8 16 12 10 16 10 8" fill="currentColor" />
@@ -71,7 +71,7 @@ function ProfileIcon({ active }) {
       strokeWidth="2"
       strokeLinecap="round"
       strokeLinejoin="round"
-      className={active ? 'text-claudio-400' : 'text-white/40'}
+      className={active ? 'text-flowstate-400' : 'text-white/40'}
     >
       <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
       <circle cx="12" cy="7" r="4" />
@@ -90,7 +90,7 @@ function SettingsIcon({ active }) {
       strokeWidth="2"
       strokeLinecap="round"
       strokeLinejoin="round"
-      className={active ? 'text-claudio-400' : 'text-white/40'}
+      className={active ? 'text-flowstate-400' : 'text-white/40'}
     >
       <circle cx="12" cy="12" r="3" />
       <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />

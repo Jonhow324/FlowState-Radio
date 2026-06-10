@@ -11,7 +11,7 @@
 
 @layer components {
   .btn-primary {
-    @apply px-4 py-2 rounded-full bg-claudio-600 hover:bg-claudio-500 
+    @apply px-4 py-2 rounded-full bg-flowstate-600 hover:bg-flowstate-500 
            transition-colors duration-200 text-white font-medium;
   }
 

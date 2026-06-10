@@ -1,4 +1,4 @@
-// scheduler.js — Claudio's Rhythm Scheduler (cron-based)
+// scheduler.js — FlowState Radio's Rhythm Scheduler (cron-based)
 // 3 scheduled tasks: daily plan (07:00), morning briefing (09:00), hourly check
 // Plus: rolling queue pre-fetch + filler transition system
 
@@ -202,7 +202,7 @@ class Scheduler {
     }
 
     // Save message
-    state.logMessage('claudio', result.say || '早安！新的一天开始了。');
+    state.logMessage('flowstate', result.say || '早安！新的一天开始了。');
 
     // Broadcast morning briefing
     if (this.broadcast) {
@@ -410,7 +410,7 @@ class Scheduler {
     }
 
     // Log and broadcast (unless silent mode — caller will embed TTS into now-playing)
-    state.logMessage('claudio', fillerResult.text);
+    state.logMessage('flowstate', fillerResult.text);
 
     if (!silent && this.broadcast) {
       this.broadcast({
@@ -474,7 +474,7 @@ class Scheduler {
     if (result.say) {
       const ttsResult = await tts.synthesize(result.say);
       ttsUrl = ttsResult.url;
-      state.logMessage('claudio', result.say);
+      state.logMessage('flowstate', result.say);
     }
 
     // Resolve and add tracks

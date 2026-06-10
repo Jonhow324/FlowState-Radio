@@ -18,8 +18,8 @@ function useMediaSession() {
 
       navigator.mediaSession.metadata = new MediaMetadata({
         title: currentTrack.trackName || 'Unknown',
-        artist: currentTrack.artist || 'Claudio Radio',
-        album: 'Claudio AI DJ',
+        artist: currentTrack.artist || 'FlowState Radio',
+        album: 'FlowState AI DJ',
         artwork,
       });
     }

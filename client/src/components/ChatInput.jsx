@@ -75,11 +75,11 @@ function ChatInput() {
         <button
           onClick={handleSend}
           disabled={!message.trim() || isSending}
-          className="p-2 text-claudio-400 hover:text-claudio-300 disabled:text-white/20 
+          className="p-2 text-flowstate-400 hover:text-flowstate-300 disabled:text-white/20 
                      disabled:cursor-not-allowed transition-colors"
         >
           {isSending ? (
-            <div className="w-4 h-4 border-2 border-claudio-500 border-t-transparent rounded-full animate-spin" />
+            <div className="w-4 h-4 border-2 border-flowstate-500 border-t-transparent rounded-full animate-spin" />
           ) : (
             <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
               <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />

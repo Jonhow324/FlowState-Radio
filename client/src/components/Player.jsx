@@ -34,7 +34,7 @@ function Player() {
 
         {/* Album art container */}
         <motion.div
-          className="relative w-64 h-64 rounded-2xl overflow-hidden shadow-2xl shadow-claudio-900/50"
+          className="relative w-64 h-64 rounded-2xl overflow-hidden shadow-2xl shadow-flowstate-900/50"
           animate={isPlaying ? { scale: [1, 1.015, 1] } : { scale: 1 }}
           transition={{ duration: 4, repeat: isPlaying ? Infinity : 0, ease: 'easeInOut' }}
         >
@@ -54,7 +54,7 @@ function Player() {
                   className="w-full h-full object-cover"
                 />
               ) : (
-                <div className="w-full h-full bg-gradient-to-br from-claudio-800 to-slate-900 flex items-center justify-center">
+                <div className="w-full h-full bg-gradient-to-br from-flowstate-800 to-slate-900 flex items-center justify-center">
                   <svg
                     width="64"
                     height="64"
@@ -84,7 +84,7 @@ function Player() {
         <AnimatePresence mode="wait">
           <motion.div key={trackKey} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.25 }}>
             <h2 className="text-lg font-semibold truncate">
-              {currentTrack?.trackName || 'Claudio FM'}
+              {currentTrack?.trackName || 'FlowState FM'}
             </h2>
             <p className="text-sm text-white/50 truncate">
               {currentTrack?.artist || 'AI Radio DJ'}
@@ -97,7 +97,7 @@ function Player() {
       <div className="w-full mb-6">
         <div className="h-1 bg-white/10 rounded-full overflow-hidden">
           <motion.div
-            className="h-full bg-claudio-500 rounded-full"
+            className="h-full bg-flowstate-500 rounded-full"
             style={{ width: `${progressPercent}%` }}
             transition={{ duration: 0.3 }}
           />
@@ -122,9 +122,9 @@ function Player() {
 
         <motion.button
           onClick={togglePlay}
-          className="w-16 h-16 rounded-full bg-claudio-600 hover:bg-claudio-500 
+          className="w-16 h-16 rounded-full bg-flowstate-600 hover:bg-flowstate-500 
                      flex items-center justify-center
-                     shadow-lg shadow-claudio-600/30"
+                     shadow-lg shadow-flowstate-600/30"
           whileTap={{ scale: 0.9 }}
           whileHover={{ scale: 1.05 }}
           transition={{ type: 'spring', stiffness: 400, damping: 17 }}

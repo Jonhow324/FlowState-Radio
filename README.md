@@ -1,4 +1,4 @@
-# Claudio — AI 音乐电台 DJ
+# FlowState Radio — AI 音乐电台 DJ
 
 个人 AI 音乐电台，基于三层 RAG 架构实现智能选歌 + DJ 串词 + 自动播放。
 
@@ -245,7 +245,7 @@ cd server && npx vitest run
 ## 文件结构
 
 ```
-claudio/
+flowstate-radio/
 ├── .env                          # 环境变量
 ├── data/
 │   └── vector-db.json            # 向量数据库（歌曲 + embedding + NCM 信息）

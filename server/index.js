@@ -1,4 +1,4 @@
-// index.js — Claudio Server Entry Point
+// index.js — FlowState Radio Server Entry Point
 
 const express = require('express');
 const cors = require('cors');
@@ -79,7 +79,7 @@ async function startServer() {
     // Send welcome message on connect
     ws.send(JSON.stringify({
       type: 'system',
-      data: { message: 'Connected to Claudio', level: 'info' },
+      data: { message: 'Connected to FlowState', level: 'info' },
     }));
   });
 
@@ -134,7 +134,7 @@ async function startServer() {
     }
     res.sendFile(path.join(clientDist, 'index.html'), (err) => {
       if (err) {
-        res.status(200).json({ message: 'Claudio API is running. Frontend not built yet.' });
+        res.status(200).json({ message: 'FlowState Radio API is running. Frontend not built yet.' });
       }
     });
   });
@@ -152,7 +152,7 @@ async function startServer() {
 
   // ===== Start Server =====
   server.listen(config.port, () => {
-    logger.info('SERVER', `Claudio server running on http://localhost:${config.port}`);
+    logger.info('SERVER', `FlowState Radio server running on http://localhost:${config.port}`);
     logger.info('SERVER', `WebSocket stream at ws://localhost:${config.port}/stream`);
     logger.info('SERVER', `Environment: ${config.nodeEnv}`);
 

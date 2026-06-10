@@ -21,7 +21,7 @@ function NowPlayingBar() {
           {/* Mini progress bar at top */}
           <div className="absolute top-0 left-0 right-0 h-0.5 bg-white/5">
             <motion.div
-              className="h-full bg-claudio-500/60"
+              className="h-full bg-flowstate-500/60"
               style={{ width: `${progressPercent}%` }}
               transition={{ duration: 0.3 }}
             />
@@ -64,7 +64,7 @@ function NowPlayingBar() {
           {/* Play/Pause button */}
           <motion.button
             onClick={togglePlay}
-            className="w-9 h-9 rounded-full bg-claudio-600 flex items-center justify-center shrink-0"
+            className="w-9 h-9 rounded-full bg-flowstate-600 flex items-center justify-center shrink-0"
             whileTap={{ scale: 0.88 }}
           >
             {isPlaying ? (
@@ -91,7 +91,7 @@ function PlayingIndicator() {
       {[0, 1, 2].map((i) => (
         <motion.span
           key={i}
-          className="w-[2px] bg-claudio-400 rounded-full"
+          className="w-[2px] bg-flowstate-400 rounded-full"
           animate={{ height: ['30%', '100%', '50%', '80%', '30%'] }}
           transition={{
             duration: 0.8,

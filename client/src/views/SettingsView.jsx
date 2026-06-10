@@ -122,11 +122,11 @@ function SettingsView() {
         animate="visible"
         variants={cardVariants}
       >
-        <h3 className="text-sm font-medium text-claudio-400 mb-3">DJ 主播</h3>
+        <h3 className="text-sm font-medium text-flowstate-400 mb-3">DJ 主播</h3>
         <div className="flex gap-3">
           {[
-            { id: 'zh', label: 'Claudio', desc: '中文电台 · 温暖亲切', emoji: '🎙️' },
-            { id: 'en', label: 'DJ Claudio', desc: 'English · Cool & Smooth', emoji: '🎧' },
+            { id: 'zh', label: 'FlowState', desc: '中文电台 · 温暖亲切', emoji: '🎙️' },
+            { id: 'en', label: 'DJ FlowState', desc: 'English · Cool & Smooth', emoji: '🎧' },
           ].map((dj) => (
             <motion.button
               key={dj.id}
@@ -135,7 +135,7 @@ function SettingsView() {
               whileTap={{ scale: 0.97 }}
               className={`flex-1 p-3 rounded-xl border transition-all duration-200 ${
                 activeDj === dj.id
-                  ? 'border-claudio-500 bg-claudio-900/50'
+                  ? 'border-flowstate-500 bg-flowstate-900/50'
                   : 'border-white/10 bg-white/5 hover:border-white/20'
               } ${switching ? 'opacity-50' : ''}`}
             >
@@ -146,7 +146,7 @@ function SettingsView() {
           ))}
         </div>
         {switching && (
-          <p className="text-xs text-claudio-500 mt-2 animate-pulse">切换中...</p>
+          <p className="text-xs text-flowstate-500 mt-2 animate-pulse">切换中...</p>
         )}
       </motion.div>
 
@@ -158,7 +158,7 @@ function SettingsView() {
         animate="visible"
         variants={cardVariants}
       >
-        <h3 className="text-sm font-medium text-claudio-400 mb-3">音量</h3>
+        <h3 className="text-sm font-medium text-flowstate-400 mb-3">音量</h3>
         <div className="flex items-center gap-3">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-white/40">
             <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
@@ -171,7 +171,7 @@ function SettingsView() {
             onChange={handleVolumeChange}
             onMouseUp={handleVolumeCommit}
             onTouchEnd={handleVolumeCommit}
-            className="flex-1 accent-claudio-500 h-1"
+            className="flex-1 accent-flowstate-500 h-1"
           />
           <span className="text-sm text-white/50 w-8 text-right">{localVolume}%</span>
         </div>
@@ -186,7 +186,7 @@ function SettingsView() {
         variants={cardVariants}
       >
         <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-medium text-claudio-400">TTS 音色</h3>
+          <h3 className="text-sm font-medium text-flowstate-400">TTS 音色</h3>
           {ttsAvailable ? (
             <span className="text-[10px] bg-green-500/20 text-green-400 px-2 py-0.5 rounded-full">已连接</span>
           ) : (
@@ -200,7 +200,7 @@ function SettingsView() {
                 key={v.id}
                 className={`flex items-center justify-between p-2.5 rounded-lg transition-all ${
                   selectedVoice === v.id
-                    ? 'bg-claudio-900/50 border border-claudio-500/50'
+                    ? 'bg-flowstate-900/50 border border-flowstate-500/50'
                     : 'bg-white/5 border border-transparent hover:bg-white/10'
                 }`}
               >
@@ -216,7 +216,7 @@ function SettingsView() {
                     onClick={() => handleVoicePreview(v.id)}
                     disabled={previewing === v.id}
                     className={`p-1.5 rounded-full transition-all ${
-                      previewing === v.id ? 'text-green-400' : 'text-white/30 hover:text-claudio-400'
+                      previewing === v.id ? 'text-green-400' : 'text-white/30 hover:text-flowstate-400'
                     }`}
                     title="试听"
                   >
@@ -232,7 +232,7 @@ function SettingsView() {
                     )}
                   </button>
                   {selectedVoice === v.id && (
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" className="text-claudio-400">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" className="text-flowstate-400">
                       <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z" />
                     </svg>
                   )}
@@ -255,7 +255,7 @@ function SettingsView() {
         animate="visible"
         variants={cardVariants}
       >
-        <h3 className="text-sm font-medium text-claudio-400 mb-3">系统状态</h3>
+        <h3 className="text-sm font-medium text-flowstate-400 mb-3">系统状态</h3>
         <div className="space-y-2">
           <div className="flex justify-between text-sm">
             <span className="text-white/50">调度器</span>
@@ -290,7 +290,7 @@ function SettingsView() {
         animate="visible"
         variants={cardVariants}
       >
-        <h3 className="text-sm font-medium text-claudio-400 mb-3">手动触发</h3>
+        <h3 className="text-sm font-medium text-flowstate-400 mb-3">手动触发</h3>
         <div className="flex gap-2">
           <TriggerButton label="早安播报" endpoint="/api/scheduler/briefing" />
           <TriggerButton label="今日规划" endpoint="/api/scheduler/plan" />
@@ -306,8 +306,8 @@ function SettingsView() {
         animate="visible"
         variants={cardVariants}
       >
-        <h3 className="text-sm font-medium text-claudio-400 mb-2">关于</h3>
-        <p className="text-sm text-white/60">Claudio v0.3.0</p>
+        <h3 className="text-sm font-medium text-flowstate-400 mb-2">关于</h3>
+        <p className="text-sm text-white/60">FlowState Radio v0.3.0</p>
         <p className="text-xs text-white/30 mt-1">AI Music Radio DJ · Phase 4</p>
       </motion.div>
     </motion.div>

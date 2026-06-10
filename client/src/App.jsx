@@ -29,7 +29,7 @@ function App() {
       {/* Header */}
       <header className="flex items-center justify-between px-5 pt-6 pb-3">
         <h1 className="text-xl font-bold tracking-tight">
-          <span className="text-claudio-400">Claudio</span>
+          <span className="text-flowstate-400">FlowState</span>
           <span className="text-white/40 text-sm ml-2 font-normal">FM</span>
         </h1>
         <div className="text-xs text-white/30">AI Radio</div>

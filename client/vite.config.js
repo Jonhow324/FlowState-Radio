@@ -26,8 +26,8 @@ export default defineConfig({
         ],
       },
       manifest: {
-        name: 'Claudio - AI Music Radio DJ',
-        short_name: 'Claudio',
+        name: 'FlowState Radio - AI Music Radio DJ',
+        short_name: 'FlowState',
         description: 'Your personal AI radio DJ — powered by DeepSeek + NeteaseCloudMusic',
         theme_color: '#1a1a2e',
         background_color: '#020617',

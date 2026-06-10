@@ -1,4 +1,4 @@
-// state.js — SQLite database wrapper for Claudio (using sql.js)
+// state.js — SQLite database wrapper for FlowState Radio (using sql.js)
 
 const initSqlJs = require('sql.js');
 const fs = require('fs');

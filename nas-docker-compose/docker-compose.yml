@@ -6,8 +6,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: claudio-ncm-enhanced:latest
-    container_name: claudio-ncm
+    image: flowstate-radio-ncm-enhanced:latest
+    container_name: flowstate-radio-ncm
     ports:
       - "3761:3000"
     restart: unless-stopped

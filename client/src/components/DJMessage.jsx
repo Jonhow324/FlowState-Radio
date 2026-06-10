@@ -38,7 +38,7 @@ function DJMessage({ message }) {
             )}
 
             <div className="flex items-start gap-3">
-              <div className="w-8 h-8 rounded-full bg-claudio-700 flex items-center justify-center shrink-0 mt-0.5 relative">
+              <div className="w-8 h-8 rounded-full bg-flowstate-700 flex items-center justify-center shrink-0 mt-0.5 relative">
                 <svg
                   width="16"
                   height="16"
@@ -46,7 +46,7 @@ function DJMessage({ message }) {
                   fill="none"
                   stroke="currentColor"
                   strokeWidth="2"
-                  className="text-claudio-300"
+                  className="text-flowstate-300"
                 >
                   <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
                   <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
@@ -63,7 +63,7 @@ function DJMessage({ message }) {
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 mb-1">
-                  <p className="text-xs text-claudio-400 font-medium">DJ Claudio</p>
+                  <p className="text-xs text-flowstate-400 font-medium">DJ FlowState</p>
                   {isSpeaking && (
                     <motion.span
                       className="text-[10px] text-green-400"

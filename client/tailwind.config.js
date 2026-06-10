@@ -4,7 +4,7 @@ export default {
   theme: {
     extend: {
       colors: {
-        'claudio': {
+        'flowstate': {
           50: '#f0f0ff',
           100: '#e0e0ff',
           200: '#c4c4ff',

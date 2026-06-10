@@ -1,6 +1,6 @@
-// WebSocket client for Claudio
+// WebSocket client for FlowState Radio
 
-class ClaudioWS {
+class FlowStateWS {
   constructor() {
     this.ws = null;
     this.listeners = new Map();
@@ -78,5 +78,5 @@ class ClaudioWS {
 }
 
 // Singleton instance
-const wsClient = new ClaudioWS();
+const wsClient = new FlowStateWS();
 export default wsClient;

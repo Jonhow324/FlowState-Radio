@@ -7,7 +7,7 @@ const path = require('path');
 require('dotenv').config({ path: path.resolve(__dirname, '../../.env') });
 
 async function main() {
-  console.log('Initializing Claudio database...');
+  console.log('Initializing FlowState Radio database...');
 
   const { initDatabase, saveDbSync, getCurrentState } = require('../state');
   await initDatabase();

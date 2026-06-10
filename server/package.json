@@ -1,7 +1,7 @@
 {
-  "name": "claudio-server",
+  "name": "flowstate-radio-server",
   "version": "0.1.0",
-  "description": "Claudio - AI Music Radio DJ Backend",
+  "description": "FlowState Radio - AI Music Radio DJ Backend",
   "main": "index.js",
   "scripts": {
     "dev": "nodemon index.js",

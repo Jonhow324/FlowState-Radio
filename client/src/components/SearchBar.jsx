@@ -62,7 +62,7 @@ function SearchBar() {
           className="flex-1 bg-transparent text-sm text-white placeholder-white/30 outline-none"
         />
         {isSearching && (
-          <div className="w-4 h-4 border-2 border-claudio-500 border-t-transparent rounded-full animate-spin" />
+          <div className="w-4 h-4 border-2 border-flowstate-500 border-t-transparent rounded-full animate-spin" />
         )}
         {keyword && (
           <button
@@ -167,7 +167,7 @@ function SearchResultItem({ track, onSelect }) {
       <button
         onClick={handlePlay}
         disabled={isAdding}
-        className="w-8 h-8 rounded-full bg-claudio-600 hover:bg-claudio-500 
+        className="w-8 h-8 rounded-full bg-flowstate-600 hover:bg-flowstate-500 
                    flex items-center justify-center shrink-0 transition-colors"
       >
         {isAdding ? (
@@ -197,7 +197,7 @@ function SearchResultItem({ track, onSelect }) {
       <button
         onClick={handleAddToQueue}
         disabled={isAdding}
-        className="opacity-0 group-hover:opacity-100 p-1.5 text-white/30 hover:text-claudio-400 
+        className="opacity-0 group-hover:opacity-100 p-1.5 text-white/30 hover:text-flowstate-400 
                    transition-all"
         title="加入队列"
       >

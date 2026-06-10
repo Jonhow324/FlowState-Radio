@@ -60,7 +60,7 @@ router.post('/voice', (req, res) => {
 // Body: { voiceId?: 'male-qn-qingse', text?: '自定义文本' }
 router.post('/preview', async (req, res) => {
   const { voiceId, text } = req.body;
-  const previewText = text || '你好，我是你的AI电台主播Claudio，今天为你带来最好听的音乐。';
+  const previewText = text || '你好，我是你的AI电台主播FlowState，今天为你带来最好听的音乐。';
 
   // If voiceId is provided, temporarily switch to preview it
   let prevZh, prevEn;

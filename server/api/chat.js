@@ -419,10 +419,10 @@ router.post('/', async (req, res) => {
           }
         }
 
-        // Log Claudio's response
+        // Log FlowState's response
         let ttsUrl = null;
         if (aiResult.say) {
-          state.logMessage('claudio', aiResult.say);
+          state.logMessage('flowstate', aiResult.say);
           // Synthesize TTS (non-blocking for response, but include URL)
           try {
             const ttsResult = await tts.synthesize(aiResult.say);

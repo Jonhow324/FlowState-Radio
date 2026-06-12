@@ -276,6 +276,27 @@ Bridge 采用异步后生成而非 LLM 直接输出，是因为 LLM 在选歌阶
 
 Segment 被消费后会从 `_segmentMap` 中移除，防止重复播放。
 
+### back_announce（歌曲回顾）
+
+歌曲播放结束后、下一首歌开始前，系统可选择播放一段 back_announce 语音回顾刚结束的歌曲。在异步 Segment 生成阶段，系统对约 50% 的歌曲生成 back_announce（模板文案，如"刚才那是周杰伦的《晴天》，经典中的经典"）。
+
+对于 ambient / instrumental / classical 标签的歌曲，back_announce 会使用更克制的文案（如"《Weightless》的旋律渐渐散去，什么都不用说"）。
+
+前端在 audio `ended` 事件触发时检查 `pendingSegments` 中是否有就绪的 `after_track` Segment，如有则先播放 TTS，播完后自动调用 `skipNext()` 切歌。
+
+### silence（刻意留白）
+
+不是每两首歌之间都需要 DJ 说话。`shouldSilence()` 在以下场景自动将 bridge 替换为 silence Segment（无 TTS，直接切歌）：
+
+| 触发条件 | 说明 |
+|----------|------|
+| 前一首歌标签含 emotional / ambient / instrumental 等 | 让情绪沉浸曲的余韵多留一会儿 |
+| 深夜时段（23:00–06:00） | 40% 概率插入 silence，降低 DJ 说话频率 |
+| 连续 3 个 bridge 后 | 给听众一段纯音乐的呼吸空间 |
+| 下一首歌标签含 emotional / instrumental 等 | 用静默作为情绪曲的轻柔引入 |
+
+silence Segment 的 `ttsStatus` 为 `'silent'`，`transitionStyle` 为 `'none'`，前端收到后不播放 TTS，直接切到下一首歌。
+
 ### 四层去重状态机
 
 `segmentEngine.dedupCheck()` 实现了四层去重检查，防止选歌重复：
@@ -291,9 +312,10 @@ Segment 被消费后会从 `_segmentMap` 中移除，防止重复播放。
 
 | 事件 | 数据 | 触发时机 |
 |------|------|----------|
-| `segment-ready` | Segment 对象（含 ttsUrl） | bridge 后生成完成 / cold_open 解析完成 |
+| `segment-ready` | Segment 对象（含 ttsUrl） | bridge / back_announce / silence 后生成完成 |
 | `now-playing` + `coldOpen` | 附加 cold_open Segment | AI 推荐第一首歌时 |
 | `now-playing` + `ttsUrl` + `fillerType: 'bridge'` | bridge Segment 嵌入 | 切歌时使用预生成 bridge |
+| `now-playing` + `afterTrack` | 附加 back_announce Segment | 切歌时存在就绪的歌曲回顾 |
 
 前端 `appStore` 维护 `pendingSegments` 数组，收到 `segment-ready` 事件时存入。歌曲播完后检查是否有 `afterTrack` Segment（back_announce），如有则先播放点评再切歌。
 
@@ -301,7 +323,7 @@ Segment 被消费后会从 `_segmentMap` 中移除，防止重复播放。
 
 | 文件 | 职责 |
 |------|------|
-| `server/services/segmentEngine.js` | Segment 引擎：归一化 / bridge 生成 / 去重 / Map 构建 |
+| `server/services/segmentEngine.js` | Segment 引擎：归一化 / bridge / back_announce / silence / 去重 |
 | `server/state.js` | Segment 内存存储（`_segmentMap`）+ `getRecentPlaysForDedup` |
 | `server/brain.js` | Layer 3 prompt 输出 `segments[]` 编排指令 |
 | `server/api/chat.js` | AI 管线集成：归一化 → 存储 → 异步 bridge → cold_open |
@@ -309,7 +331,7 @@ Segment 被消费后会从 `_segmentMap` 中移除，防止重复播放。
 | `server/scheduler.js` | autoRefillQueue 异步生成 bridge Segment |
 | `client/src/hooks/useWebSocket.js` | 处理 `segment-ready` 事件 |
 | `client/src/stores/appStore.js` | `pendingSegments` 状态 + afterTrack 播放 |
-| `server/tests/segment.test.js` | 40 个单元测试覆盖核心逻辑 |
+| `server/tests/segment.test.js` | 58 个单元测试覆盖核心逻辑 |
 
 ---
 

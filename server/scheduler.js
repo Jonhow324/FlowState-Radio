@@ -363,31 +363,62 @@ class Scheduler {
             data: { queue: state.getQueue() },
           });
 
-          // ── Segment Bridge Post-Generation ───────────────────────
-          // Generate bridge segments between adjacent newly-queued tracks
+          // ── Segment Bridge + Back Announce + Silence Post-Generation ──
           this._refillBatch++;
           const batchId = this._refillBatch;
           (async () => {
+            let consecutiveBridges = 0;
+
             for (let i = 0; i < resolvedTracks.length - 1; i++) {
-              const prev = { name: resolvedTracks[i].trackName || resolvedTracks[i].name, artist: resolvedTracks[i].artist };
-              const next = { name: resolvedTracks[i + 1].trackName || resolvedTracks[i + 1].name, artist: resolvedTracks[i + 1].artist };
-              const bridgeInfo = segmentEngine.generateBridgeText(prev, next);
-              const bridgeSeg = {
-                id: `seg:bridge:refill:${i}`,
-                type: 'bridge',
-                position: 'between_tracks',
-                anchorTrackIndex: i,
-                text: bridgeInfo.text,
-                ttsUrl: null,
-                ttsStatus: 'pending',
-                transitionStyle: bridgeInfo.transitionStyle,
-                metadata: { prevSong: prev, nextSong: next },
+              const prev = {
+                name: resolvedTracks[i].trackName || resolvedTracks[i].name,
+                artist: resolvedTracks[i].artist,
+                tags: state.getTrackMeta(resolvedTracks[i].trackId)?.tags || '',
               };
-              await segmentEngine.resolveSegmentTTS(bridgeSeg);
-              state.addSegment(`between_tracks:refill:${batchId}:${i}`, bridgeSeg);
-              this.broadcast({ type: 'segment-ready', data: bridgeSeg });
+              const next = {
+                name: resolvedTracks[i + 1].trackName || resolvedTracks[i + 1].name,
+                artist: resolvedTracks[i + 1].artist,
+                tags: state.getTrackMeta(resolvedTracks[i + 1].trackId)?.tags || '',
+              };
+
+              // Silence check
+              const silenceResult = segmentEngine.shouldSilence({
+                prevSong: prev, nextSong: next, consecutiveBridges,
+              });
+
+              if (silenceResult.shouldSilence) {
+                const silenceSeg = segmentEngine.buildSilenceSegment(i, silenceResult.reason, `refill${batchId}`);
+                state.addSegment(`between_tracks:refill:${batchId}:${i}`, silenceSeg);
+                this.broadcast({ type: 'segment-ready', data: silenceSeg });
+                consecutiveBridges = 0;
+              } else {
+                const bridgeInfo = segmentEngine.generateBridgeText(prev, next);
+                const bridgeSeg = {
+                  id: `seg:bridge:refill:${batchId}:${i}`,
+                  type: 'bridge',
+                  position: 'between_tracks',
+                  anchorTrackIndex: i,
+                  text: bridgeInfo.text,
+                  ttsUrl: null,
+                  ttsStatus: 'pending',
+                  transitionStyle: bridgeInfo.transitionStyle,
+                  metadata: { prevSong: prev, nextSong: next },
+                };
+                await segmentEngine.resolveSegmentTTS(bridgeSeg);
+                state.addSegment(`between_tracks:refill:${batchId}:${i}`, bridgeSeg);
+                this.broadcast({ type: 'segment-ready', data: bridgeSeg });
+                consecutiveBridges++;
+              }
+
+              // Back announce (~50% probability)
+              if (Math.random() < 0.5) {
+                const backSeg = segmentEngine.buildBackAnnounceSegment(prev, i, `refill${batchId}`);
+                await segmentEngine.resolveSegmentTTS(backSeg);
+                state.addSegment(`after_track:refill:${batchId}:${i}`, backSeg);
+                this.broadcast({ type: 'segment-ready', data: backSeg });
+              }
             }
-          })().catch(err => logger.warn('SCHEDULER', `Refill bridge generation failed: ${err.message}`));
+          })().catch(err => logger.warn('SCHEDULER', `Refill segment generation failed: ${err.message}`));
         }
       } else {
         logger.warn('SCHEDULER', 'Rolling queue refill: no tracks resolved');

@@ -108,14 +108,39 @@ const useAppStore = create((set, get) => ({
     audio.addEventListener('ended', () => {
       const afterSeg = get().getAfterTrackSegment();
       if (afterSeg && afterSeg.ttsUrl) {
-        // Phase 2: Play back_announce / afterTrack commentary, then skip
-        get().playTTS(afterSeg.ttsUrl);
+        // Phase 2: Play back_announce commentary, then skip to next track
         get().removeSegment(afterSeg.id);
-        const onAfterEnded = () => {
+        set({ isSpeaking: true });
+
+        const cleanup = () => {
           ttsAudio.removeEventListener('ended', onAfterEnded);
+          ttsAudio.removeEventListener('error', onAfterError);
+        };
+
+        const onAfterEnded = () => {
+          cleanup();
+          set({ isSpeaking: false });
           get().skipNext();
         };
+
+        const onAfterError = () => {
+          cleanup();
+          set({ isSpeaking: false });
+          // TTS failed — skip to next track immediately
+          get().skipNext();
+        };
+
         ttsAudio.addEventListener('ended', onAfterEnded);
+        ttsAudio.addEventListener('error', onAfterError);
+
+        // Play afterTrack TTS (no music playing at this point, so no ducking)
+        ttsAudio.src = afterSeg.ttsUrl;
+        ttsAudio.volume = get().volume;
+        ttsAudio.play().catch(() => {
+          cleanup();
+          set({ isSpeaking: false });
+          get().skipNext();
+        });
       } else {
         get().skipNext();
       }

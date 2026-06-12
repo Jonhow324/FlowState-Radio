@@ -168,6 +168,101 @@ function getSegmentsForTrack(segmentMap, trackIndex) {
   return { beforeTrack, afterTrack };
 }
 
+function pickRandom(arr) {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
+// ── Phase 2: Back Announce + Silence (local re-implementation) ──
+
+function generateBackAnnounce(song, options = {}) {
+  const name = song.name || song.trackName || '这首歌';
+  const artist = song.artist || '';
+
+  const templates = [
+    `刚才那是${artist ? artist + '的' : ''}《${name}》，${pickRandom(['经典中的经典', '百听不厌', '让人回味无穷', '值得反复品味'])}。`,
+    `${artist ? artist : ''}的《${name}》，${pickRandom(['每次听都有新感受', '总能戳中某个柔软的角落', '旋律还在耳边绕', '情绪还沉浸在里面'])}。`,
+    `一首《${name}》${pickRandom(['送给此刻的你', '献给这个夜晚', '配得上你现在的状态', '刚好契合当下的心情'])}。`,
+    `《${name}》播完了，${pickRandom(['但余韵可以留久一点', '好歌总是让人觉得太短', '让这份感觉多停留一会儿', '音乐停了，情绪还在继续'])}。`,
+  ];
+
+  const tags = (song.tags || '').toLowerCase();
+  if (tags.includes('ambient') || tags.includes('instrumental') || tags.includes('classical')) {
+    return {
+      text: pickRandom([
+        `《${name}》的旋律渐渐散去，什么都不用说。`,
+        `有些音乐不需要语言，刚才的《${name}》就是。`,
+      ]),
+      transitionStyle: 'none',
+    };
+  }
+
+  return { text: pickRandom(templates), transitionStyle: 'none' };
+}
+
+const SILENCE_CONFIG = {
+  nightHoursStart: 23,
+  nightHoursEnd: 6,
+  nightSilenceProbability: 0.4,
+  consecutiveBridgeLimit: 3,
+  emotionalTags: new Set([
+    'emotional', 'ambient', 'instrumental', 'classical',
+    'post-rock', 'shoegaze', 'dream pop', '冥想', '纯音乐',
+    '新世纪', '氛围', '后摇', '治愈',
+  ]),
+};
+
+function shouldSilence(context = {}) {
+  const { prevSong, nextSong, consecutiveBridges = 0 } = context;
+  const hour = typeof context.hour === 'number' ? context.hour : 12;
+
+  const prevTags = ((prevSong?.tags || '') + ' ' + (prevSong?.mood || '')).toLowerCase();
+  const nextTags = ((nextSong?.tags || '') + ' ' + (nextSong?.mood || '')).toLowerCase();
+  const prevIsEmotional = [...SILENCE_CONFIG.emotionalTags].some(t => prevTags.includes(t));
+  const nextIsEmotional = [...SILENCE_CONFIG.emotionalTags].some(t => nextTags.includes(t));
+
+  if (prevIsEmotional) return { shouldSilence: true, reason: 'emotional_prev' };
+
+  const isNight = hour >= SILENCE_CONFIG.nightHoursStart || hour < SILENCE_CONFIG.nightHoursEnd;
+  if (isNight) return { shouldSilence: true, reason: 'night_mode' };
+
+  if (consecutiveBridges >= SILENCE_CONFIG.consecutiveBridgeLimit) {
+    return { shouldSilence: true, reason: 'bridge_fatigue' };
+  }
+
+  if (nextIsEmotional) return { shouldSilence: true, reason: 'emotional_next' };
+
+  return { shouldSilence: false, reason: null };
+}
+
+function buildBackAnnounceSegment(song, anchorIndex, idPrefix = 'back') {
+  const info = generateBackAnnounce(song);
+  return {
+    id: `seg:back_announce:${idPrefix}:${anchorIndex}`,
+    type: 'back_announce',
+    position: 'after_track',
+    anchorTrackIndex: anchorIndex,
+    text: info.text,
+    ttsUrl: null,
+    ttsStatus: 'pending',
+    transitionStyle: info.transitionStyle,
+    metadata: { prevSong: { name: song.name || song.trackName, artist: song.artist } },
+  };
+}
+
+function buildSilenceSegment(anchorIndex, reason, idPrefix = 'silence') {
+  return {
+    id: `seg:silence:${idPrefix}:${anchorIndex}`,
+    type: 'silence',
+    position: 'between_tracks',
+    anchorTrackIndex: anchorIndex,
+    text: '',
+    ttsUrl: null,
+    ttsStatus: 'silent',
+    transitionStyle: 'none',
+    metadata: { silenceReason: reason },
+  };
+}
+
 // ── Test Data ────────────────────────────────────────────────
 
 const sampleTracks = [
@@ -632,6 +727,190 @@ describe('Segment Engine', () => {
       const map = buildSegmentMap(segments);
       const result = getSegmentsForTrack(map, 0);
       expect(result.beforeTrack.type).toBe('cold_open');
+    });
+  });
+
+  // ═══ generateBackAnnounce (Phase 2) ═══
+
+  describe('generateBackAnnounce()', () => {
+
+    it('returns text and transitionStyle: none', () => {
+      const result = generateBackAnnounce({ name: '晴天', artist: '周杰伦' });
+      expect(result.text).toBeTruthy();
+      expect(typeof result.text).toBe('string');
+      expect(result.transitionStyle).toBe('none');
+    });
+
+    it('includes song name in the text', () => {
+      for (let i = 0; i < 10; i++) {
+        const result = generateBackAnnounce({ name: '七里香', artist: '周杰伦' });
+        expect(result.text).toContain('七里香');
+      }
+    });
+
+    it('generates softer commentary for ambient/instrumental tracks', () => {
+      const result = generateBackAnnounce({
+        name: 'Weightless', artist: 'Marconi Union', tags: 'ambient',
+      });
+      expect(result.text).toBeTruthy();
+      expect(result.transitionStyle).toBe('none');
+      // Should be one of the ambient templates
+      const hasAmbientFlavor = result.text.includes('旋律') || result.text.includes('不需要语言');
+      expect(hasAmbientFlavor).toBe(true);
+    });
+
+    it('handles missing artist gracefully', () => {
+      const result = generateBackAnnounce({ name: 'Unknown Song' });
+      expect(result.text).toBeTruthy();
+      expect(result.text).toContain('Unknown Song');
+    });
+
+    it('handles missing name with fallback', () => {
+      const result = generateBackAnnounce({});
+      expect(result.text).toContain('这首歌');
+    });
+  });
+
+  // ═══ shouldSilence (Phase 2) ═══
+
+  describe('shouldSilence()', () => {
+
+    it('returns silence for emotional previous track', () => {
+      const result = shouldSilence({
+        prevSong: { name: 'A', artist: 'B', tags: 'emotional' },
+        nextSong: { name: 'C', artist: 'D' },
+        consecutiveBridges: 0,
+        hour: 14,
+      });
+      expect(result.shouldSilence).toBe(true);
+      expect(result.reason).toBe('emotional_prev');
+    });
+
+    it('returns silence for ambient previous track', () => {
+      const result = shouldSilence({
+        prevSong: { name: 'A', artist: 'B', tags: 'ambient' },
+        consecutiveBridges: 0,
+        hour: 14,
+      });
+      expect(result.shouldSilence).toBe(true);
+      expect(result.reason).toBe('emotional_prev');
+    });
+
+    it('returns silence during night hours', () => {
+      const result = shouldSilence({
+        prevSong: { name: 'A', artist: 'B', tags: 'pop' },
+        consecutiveBridges: 0,
+        hour: 23,
+      });
+      expect(result.shouldSilence).toBe(true);
+      expect(result.reason).toBe('night_mode');
+    });
+
+    it('returns silence during early morning (before 6am)', () => {
+      const result = shouldSilence({
+        prevSong: { name: 'A', artist: 'B', tags: 'pop' },
+        consecutiveBridges: 0,
+        hour: 3,
+      });
+      expect(result.shouldSilence).toBe(true);
+      expect(result.reason).toBe('night_mode');
+    });
+
+    it('returns silence after 3+ consecutive bridges', () => {
+      const result = shouldSilence({
+        prevSong: { name: 'A', artist: 'B', tags: 'pop' },
+        consecutiveBridges: 3,
+        hour: 14,
+      });
+      expect(result.shouldSilence).toBe(true);
+      expect(result.reason).toBe('bridge_fatigue');
+    });
+
+    it('does NOT trigger silence with < 3 consecutive bridges during daytime', () => {
+      const result = shouldSilence({
+        prevSong: { name: 'A', artist: 'B', tags: 'pop' },
+        consecutiveBridges: 2,
+        hour: 14,
+      });
+      expect(result.shouldSilence).toBe(false);
+    });
+
+    it('returns silence when next track is emotional', () => {
+      const result = shouldSilence({
+        prevSong: { name: 'A', artist: 'B', tags: 'pop' },
+        nextSong: { name: 'C', artist: 'D', tags: 'instrumental' },
+        consecutiveBridges: 0,
+        hour: 14,
+      });
+      expect(result.shouldSilence).toBe(true);
+      expect(result.reason).toBe('emotional_next');
+    });
+
+    it('returns silence when prev track has emotional mood', () => {
+      const result = shouldSilence({
+        prevSong: { name: 'A', artist: 'B', tags: '', mood: '治愈系' },
+        consecutiveBridges: 0,
+        hour: 14,
+      });
+      expect(result.shouldSilence).toBe(true);
+      expect(result.reason).toBe('emotional_prev');
+    });
+
+    it('no silence for normal pop tracks during daytime with few bridges', () => {
+      const result = shouldSilence({
+        prevSong: { name: 'A', artist: 'B', tags: 'pop' },
+        nextSong: { name: 'C', artist: 'D', tags: 'rock' },
+        consecutiveBridges: 1,
+        hour: 15,
+      });
+      expect(result.shouldSilence).toBe(false);
+      expect(result.reason).toBeNull();
+    });
+
+    it('handles missing context gracefully', () => {
+      const result = shouldSilence({});
+      // hour defaults to 12 (daytime), no emotional tags, 0 bridges
+      expect(result.shouldSilence).toBe(false);
+    });
+  });
+
+  // ═══ buildBackAnnounceSegment (Phase 2) ═══
+
+  describe('buildBackAnnounceSegment()', () => {
+
+    it('creates a valid back_announce segment', () => {
+      const seg = buildBackAnnounceSegment(
+        { name: '晴天', artist: '周杰伦' }, 2, 'test'
+      );
+      expect(seg.type).toBe('back_announce');
+      expect(seg.position).toBe('after_track');
+      expect(seg.anchorTrackIndex).toBe(2);
+      expect(seg.ttsStatus).toBe('pending');
+      expect(seg.text).toBeTruthy();
+      expect(seg.id).toContain('back_announce');
+    });
+
+    it('includes prevSong in metadata', () => {
+      const seg = buildBackAnnounceSegment(
+        { name: '红豆', artist: '王菲' }, 1
+      );
+      expect(seg.metadata.prevSong).toEqual({ name: '红豆', artist: '王菲' });
+    });
+  });
+
+  // ═══ buildSilenceSegment (Phase 2) ═══
+
+  describe('buildSilenceSegment()', () => {
+
+    it('creates a valid silence segment', () => {
+      const seg = buildSilenceSegment(3, 'night_mode', 'test');
+      expect(seg.type).toBe('silence');
+      expect(seg.position).toBe('between_tracks');
+      expect(seg.anchorTrackIndex).toBe(3);
+      expect(seg.text).toBe('');
+      expect(seg.ttsStatus).toBe('silent');
+      expect(seg.transitionStyle).toBe('none');
+      expect(seg.metadata.silenceReason).toBe('night_mode');
     });
   });
 });

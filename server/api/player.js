@@ -162,6 +162,14 @@ router.post('/play', async (req, res) => {
         nowPlayingData.fillerType = fillerData.type;
       }
 
+      // ── Phase 2: Attach afterTrack segment if available ──
+      const playAfterSegs = state.getAllSegments().filter(
+        s => s.type === 'back_announce' && s.ttsStatus === 'ready'
+      );
+      if (playAfterSegs.length > 0) {
+        nowPlayingData.afterTrack = playAfterSegs[0];
+      }
+
       if (broadcast) {
         broadcast({ type: 'now-playing', data: nowPlayingData });
       }
@@ -282,6 +290,14 @@ router.post('/skip', async (req, res) => {
         nowPlayingData.ttsUrl = fillerData.ttsUrl;
         nowPlayingData.fillerText = fillerData.text;
         nowPlayingData.fillerType = fillerData.type;
+      }
+
+      // ── Phase 2: Attach afterTrack segment if available ──
+      const afterTrackSegs = state.getAllSegments().filter(
+        s => s.type === 'back_announce' && s.ttsStatus === 'ready'
+      );
+      if (afterTrackSegs.length > 0) {
+        nowPlayingData.afterTrack = afterTrackSegs[0];
       }
 
       logger.info('PLAYER', `Skipped to: ${nowPlayingData.trackName} [${transitionStyle}]`);

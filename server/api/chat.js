@@ -416,29 +416,78 @@ router.post('/', async (req, res) => {
             state.setSegments(segMap);
             logger.info('CHAT', `Segments normalized: ${normalizedSegments.length} (${normalizedSegments.map(s => s.type).join(', ')})`);
 
-            // Async bridge post-generation between adjacent confirmed tracks
+            // Async bridge + back_announce + silence post-generation
             if (broadcast) {
               (async () => {
+                let consecutiveBridges = 0;
+
                 for (let i = 0; i < resolvedTracks.length - 1; i++) {
-                  const prev = { name: resolvedTracks[i].trackName || resolvedTracks[i].name, artist: resolvedTracks[i].artist };
-                  const next = { name: resolvedTracks[i + 1].trackName || resolvedTracks[i + 1].name, artist: resolvedTracks[i + 1].artist };
-                  const bridgeInfo = segmentEngine.generateBridgeText(prev, next);
-                  const bridgeSeg = {
-                    id: `seg:bridge:${i}:post`,
-                    type: 'bridge',
-                    position: 'between_tracks',
-                    anchorTrackIndex: i,
-                    text: bridgeInfo.text,
-                    ttsUrl: null,
-                    ttsStatus: 'pending',
-                    transitionStyle: bridgeInfo.transitionStyle,
-                    metadata: { prevSong: prev, nextSong: next },
+                  const prev = {
+                    name: resolvedTracks[i].trackName || resolvedTracks[i].name,
+                    artist: resolvedTracks[i].artist,
+                    tags: state.getTrackMeta(resolvedTracks[i].trackId)?.tags || '',
                   };
-                  await segmentEngine.resolveSegmentTTS(bridgeSeg);
-                  state.addSegment(`between_tracks:${i}`, bridgeSeg);
-                  broadcast({ type: 'segment-ready', data: bridgeSeg });
+                  const next = {
+                    name: resolvedTracks[i + 1].trackName || resolvedTracks[i + 1].name,
+                    artist: resolvedTracks[i + 1].artist,
+                    tags: state.getTrackMeta(resolvedTracks[i + 1].trackId)?.tags || '',
+                  };
+
+                  // ── Silence check: replace bridge with silence if appropriate ──
+                  const silenceResult = segmentEngine.shouldSilence({
+                    prevSong: prev, nextSong: next, consecutiveBridges,
+                  });
+
+                  if (silenceResult.shouldSilence) {
+                    const silenceSeg = segmentEngine.buildSilenceSegment(i, silenceResult.reason, 'chat');
+                    state.addSegment(`between_tracks:${i}`, silenceSeg);
+                    broadcast({ type: 'segment-ready', data: silenceSeg });
+                    consecutiveBridges = 0; // silence resets the counter
+                  } else {
+                    // Generate bridge
+                    const bridgeInfo = segmentEngine.generateBridgeText(prev, next);
+                    const bridgeSeg = {
+                      id: `seg:bridge:${i}:post`,
+                      type: 'bridge',
+                      position: 'between_tracks',
+                      anchorTrackIndex: i,
+                      text: bridgeInfo.text,
+                      ttsUrl: null,
+                      ttsStatus: 'pending',
+                      transitionStyle: bridgeInfo.transitionStyle,
+                      metadata: { prevSong: prev, nextSong: next },
+                    };
+                    await segmentEngine.resolveSegmentTTS(bridgeSeg);
+                    state.addSegment(`between_tracks:${i}`, bridgeSeg);
+                    broadcast({ type: 'segment-ready', data: bridgeSeg });
+                    consecutiveBridges++;
+                  }
+
+                  // ── Back announce: generate for ~50% of tracks ──
+                  if (Math.random() < 0.5) {
+                    const backSeg = segmentEngine.buildBackAnnounceSegment(prev, i, 'chat');
+                    await segmentEngine.resolveSegmentTTS(backSeg);
+                    state.addSegment(`after_track:${i}`, backSeg);
+                    broadcast({ type: 'segment-ready', data: backSeg });
+                  }
                 }
-              })().catch(err => logger.warn('CHAT', `Bridge generation failed: ${err.message}`));
+
+                // Last track: also consider back_announce
+                if (resolvedTracks.length > 0) {
+                  const lastIdx = resolvedTracks.length - 1;
+                  const lastTrack = {
+                    name: resolvedTracks[lastIdx].trackName || resolvedTracks[lastIdx].name,
+                    artist: resolvedTracks[lastIdx].artist,
+                    tags: state.getTrackMeta(resolvedTracks[lastIdx].trackId)?.tags || '',
+                  };
+                  if (Math.random() < 0.4) {
+                    const lastBack = segmentEngine.buildBackAnnounceSegment(lastTrack, lastIdx, 'chat-last');
+                    await segmentEngine.resolveSegmentTTS(lastBack);
+                    state.addSegment(`after_track:${lastIdx}`, lastBack);
+                    broadcast({ type: 'segment-ready', data: lastBack });
+                  }
+                }
+              })().catch(err => logger.warn('CHAT', `Segment generation failed: ${err.message}`));
             }
           }
 

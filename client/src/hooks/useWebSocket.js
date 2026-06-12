@@ -32,6 +32,11 @@ function useWebSocket() {
             store.addPendingSegment(data.coldOpen);
           }
 
+          // Handle afterTrack segment (back_announce after this song ends)
+          if (data.afterTrack) {
+            store.addPendingSegment(data.afterTrack);
+          }
+
           if (data.ttsUrl && (transitionStyle === 'intro' || transitionStyle === 'outro')) {
             // Intro/Outro mode: play song under DJ voice with ducking
             if (data.fillerType) store.setFillerType(data.fillerType);

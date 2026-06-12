@@ -135,6 +135,153 @@ function generateBridgeText(prevSong, nextSong, options = {}) {
   return { text, transitionStyle: 'outro' };
 }
 
+// ── Back Announce Generation ──────────────────────────────────
+
+/**
+ * Generate a back_announce segment — a brief post-song commentary.
+ * Played after a song ends and before the next one starts.
+ *
+ * @param {object} song - { name, artist, tags? }
+ * @param {object} [options] - { mood, context }
+ * @returns {{ text: string, transitionStyle: string }}
+ */
+function generateBackAnnounce(song, options = {}) {
+  const name = song.name || song.trackName || '这首歌';
+  const artist = song.artist || '';
+
+  const templates = [
+    `刚才那是${artist ? artist + '的' : ''}《${name}》，${pickRandom(['经典中的经典', '百听不厌', '让人回味无穷', '值得反复品味'])}。`,
+    `${artist ? artist : ''}的《${name}》，${pickRandom(['每次听都有新感受', '总能戳中某个柔软的角落', '旋律还在耳边绕', '情绪还沉浸在里面'])}。`,
+    `一首《${name}》${pickRandom(['送给此刻的你', '献给这个夜晚', '配得上你现在的状态', '刚好契合当下的心情'])}。`,
+    `《${name}》播完了，${pickRandom(['但余韵可以留久一点', '好歌总是让人觉得太短', '让这份感觉多停留一会儿', '音乐停了，情绪还在继续'])}。`,
+  ];
+
+  // Emotional/instrumental tracks get softer commentary
+  const tags = (song.tags || '').toLowerCase();
+  if (tags.includes('ambient') || tags.includes('instrumental') || tags.includes('classical')) {
+    return {
+      text: pickRandom([
+        `《${name}》的旋律渐渐散去，什么都不用说。`,
+        `有些音乐不需要语言，刚才的《${name}》就是。`,
+      ]),
+      transitionStyle: 'none',
+    };
+  }
+
+  return {
+    text: pickRandom(templates),
+    transitionStyle: 'none',
+  };
+}
+
+// ── Silence Detection ─────────────────────────────────────────
+
+const SILENCE_CONFIG = {
+  nightHoursStart: 23,       // 深夜开始：23:00
+  nightHoursEnd: 6,          // 深夜结束：06:00
+  nightSilenceProbability: 0.4,  // 深夜 40% 概率插入 silence
+  consecutiveBridgeLimit: 3, // 连续 3 个 bridge 后考虑 silence
+  emotionalTags: new Set([
+    'emotional', 'ambient', 'instrumental', 'classical',
+    'post-rock', 'shoegaze', 'dream pop', '冥想', '纯音乐',
+    '新世纪', '氛围', '后摇', '治愈',
+  ]),
+};
+
+/**
+ * Decide whether a silence segment should be inserted at this position.
+ *
+ * @param {object} context
+ * @param {object} context.prevSong - { name, artist, tags? }
+ * @param {object} [context.nextSong] - { name, artist, tags? }
+ * @param {number} context.consecutiveBridges - How many bridges in a row so far
+ * @param {number} [context.hour] - Current hour (0-23), defaults to Date.now()
+ * @returns {{ shouldSilence: boolean, reason: string|null }}
+ */
+function shouldSilence(context = {}) {
+  const { prevSong, nextSong, consecutiveBridges = 0 } = context;
+  const hour = typeof context.hour === 'number' ? context.hour : new Date().getHours();
+
+  // Rule 1: Emotional/ambient tracks → silence lets the mood breathe
+  const prevTags = ((prevSong?.tags || '') + ' ' + (prevSong?.mood || '')).toLowerCase();
+  const nextTags = ((nextSong?.tags || '') + ' ' + (nextSong?.mood || '')).toLowerCase();
+  const prevIsEmotional = [...SILENCE_CONFIG.emotionalTags].some(t => prevTags.includes(t));
+  const nextIsEmotional = [...SILENCE_CONFIG.emotionalTags].some(t => nextTags.includes(t));
+
+  if (prevIsEmotional) {
+    return { shouldSilence: true, reason: 'emotional_prev' };
+  }
+
+  // Rule 2: Late night — reduce DJ chatter with probability
+  const isNight = hour >= SILENCE_CONFIG.nightHoursStart || hour < SILENCE_CONFIG.nightHoursEnd;
+  if (isNight && Math.random() < SILENCE_CONFIG.nightSilenceProbability) {
+    return { shouldSilence: true, reason: 'night_mode' };
+  }
+
+  // Rule 3: Too many consecutive bridges — give listeners a breather
+  if (consecutiveBridges >= SILENCE_CONFIG.consecutiveBridgeLimit) {
+    return { shouldSilence: true, reason: 'bridge_fatigue' };
+  }
+
+  // Rule 4: Next track is emotional → silence as a gentle lead-in
+  if (nextIsEmotional) {
+    return { shouldSilence: true, reason: 'emotional_next' };
+  }
+
+  return { shouldSilence: false, reason: null };
+}
+
+// ── Shared Helpers ────────────────────────────────────────────
+
+function pickRandom(arr) {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
+// ── Segment Factories ─────────────────────────────────────────
+
+/**
+ * Build a back_announce Segment object for a confirmed track.
+ * @param {object} song - { name, artist, tags? }
+ * @param {number} anchorIndex - Track's index in the batch
+ * @param {string} [idPrefix='back'] - ID prefix for uniqueness
+ * @returns {object} Segment
+ */
+function buildBackAnnounceSegment(song, anchorIndex, idPrefix = 'back') {
+  const info = generateBackAnnounce(song);
+  return {
+    id: `seg:back_announce:${idPrefix}:${anchorIndex}`,
+    type: 'back_announce',
+    position: 'after_track',
+    anchorTrackIndex: anchorIndex,
+    text: info.text,
+    ttsUrl: null,
+    ttsStatus: 'pending',
+    transitionStyle: info.transitionStyle,
+    metadata: { prevSong: { name: song.name || song.trackName, artist: song.artist } },
+  };
+}
+
+/**
+ * Build a silence Segment object.
+ * @param {number} anchorIndex - Track's index in the batch
+ * @param {string} reason - Why silence was chosen
+ * @param {string} [idPrefix='silence'] - ID prefix for uniqueness
+ * @returns {object} Segment
+ */
+function buildSilenceSegment(anchorIndex, reason, idPrefix = 'silence') {
+  return {
+    id: `seg:silence:${idPrefix}:${anchorIndex}`,
+    type: 'silence',
+    position: 'between_tracks',
+    anchorTrackIndex: anchorIndex,
+    text: '',
+    ttsUrl: null,
+    ttsStatus: 'silent',
+    transitionStyle: 'none',
+    metadata: { silenceReason: reason },
+  };
+}
+
 /**
  * Synthesize TTS for a segment and update its status.
  * @param {object} segment - Segment object (mutated in place)
@@ -281,11 +428,16 @@ function buildSegmentMap(segments) {
 module.exports = {
   normalizeSegments,
   generateBridgeText,
+  generateBackAnnounce,
+  shouldSilence,
   resolveSegmentTTS,
   dedupCheck,
   dedupFilter,
   getSegmentsForTrack,
   buildSegmentMap,
+  buildBackAnnounceSegment,
+  buildSilenceSegment,
   VALID_TYPES,
   VALID_POSITIONS,
+  SILENCE_CONFIG,
 };

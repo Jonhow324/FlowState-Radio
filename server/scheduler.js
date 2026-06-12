@@ -10,6 +10,7 @@ const ncm = require('./services/ncm');
 const tts = require('./tts');
 const filler = require('./services/filler');
 const segmentEngine = require('./services/segmentEngine');
+const jobQueue = require('./services/jobQueue');
 const config = require('./config');
 const logger = require('./utils/logger');
 
@@ -322,7 +323,27 @@ class Scheduler {
 
       let resolvedTracks = [];
       if (result.songs && result.songs.length > 0) {
-        for (const song of result.songs) {
+        // ── Phase 3: Four-layer dedup before NCM resolution ──
+        let songsToResolve = result.songs;
+        try {
+          const queueTracks = state.getQueue();
+          const queueIds = new Set(queueTracks.map(q => q.track_id));
+          const recentPlays = state.getRecentPlaysForDedup(50);
+          const dedupState = {
+            batchIds: new Set(),
+            queueIds,
+            recentPlays,
+          };
+          const dedupResult = segmentEngine.dedupFilter(result.songs, dedupState);
+          songsToResolve = dedupResult.accepted;
+          if (dedupResult.rejected.length > 0) {
+            logger.info('SCHEDULER', `Dedup filtered ${dedupResult.rejected.length} songs: ${dedupResult.rejected.map(r => r.reason).join(', ')}`);
+          }
+        } catch (dedupErr) {
+          logger.warn('SCHEDULER', `Dedup check failed, using unfiltered songs: ${dedupErr.message}`);
+        }
+
+        for (const song of songsToResolve) {
           try {
             // Fast path: use pre-resolved NCM ID
             if (song.ncmTrackId) {
@@ -363,62 +384,74 @@ class Scheduler {
             data: { queue: state.getQueue() },
           });
 
-          // ── Segment Bridge + Back Announce + Silence Post-Generation ──
+          // ── Phase 3: Enqueue bridge + back_announce + silence generation ──
           this._refillBatch++;
           const batchId = this._refillBatch;
-          (async () => {
-            let consecutiveBridges = 0;
+          const broadcast = this.broadcast; // Capture for jobQueue closure
+          const tracksSnapshot = resolvedTracks.map(t => ({
+            trackId: t.trackId,
+            trackName: t.trackName || t.name,
+            artist: t.artist,
+          }));
 
-            for (let i = 0; i < resolvedTracks.length - 1; i++) {
-              const prev = {
-                name: resolvedTracks[i].trackName || resolvedTracks[i].name,
-                artist: resolvedTracks[i].artist,
-                tags: state.getTrackMeta(resolvedTracks[i].trackId)?.tags || '',
-              };
-              const next = {
-                name: resolvedTracks[i + 1].trackName || resolvedTracks[i + 1].name,
-                artist: resolvedTracks[i + 1].artist,
-                tags: state.getTrackMeta(resolvedTracks[i + 1].trackId)?.tags || '',
-              };
+          jobQueue.enqueue({
+            type: 'bridge_generation',
+            dedupKey: `bridge:refill:${batchId}`,
+            payload: { tracks: tracksSnapshot, batchId },
+            execute: async (payload) => {
+              let consecutiveBridges = 0;
 
-              // Silence check
-              const silenceResult = segmentEngine.shouldSilence({
-                prevSong: prev, nextSong: next, consecutiveBridges,
-              });
-
-              if (silenceResult.shouldSilence) {
-                const silenceSeg = segmentEngine.buildSilenceSegment(i, silenceResult.reason, `refill${batchId}`);
-                state.addSegment(`between_tracks:refill:${batchId}:${i}`, silenceSeg);
-                this.broadcast({ type: 'segment-ready', data: silenceSeg });
-                consecutiveBridges = 0;
-              } else {
-                const bridgeInfo = segmentEngine.generateBridgeText(prev, next);
-                const bridgeSeg = {
-                  id: `seg:bridge:refill:${batchId}:${i}`,
-                  type: 'bridge',
-                  position: 'between_tracks',
-                  anchorTrackIndex: i,
-                  text: bridgeInfo.text,
-                  ttsUrl: null,
-                  ttsStatus: 'pending',
-                  transitionStyle: bridgeInfo.transitionStyle,
-                  metadata: { prevSong: prev, nextSong: next },
+              for (let i = 0; i < payload.tracks.length - 1; i++) {
+                const prev = {
+                  name: payload.tracks[i].trackName,
+                  artist: payload.tracks[i].artist,
+                  tags: state.getTrackMeta(payload.tracks[i].trackId)?.tags || '',
                 };
-                await segmentEngine.resolveSegmentTTS(bridgeSeg);
-                state.addSegment(`between_tracks:refill:${batchId}:${i}`, bridgeSeg);
-                this.broadcast({ type: 'segment-ready', data: bridgeSeg });
-                consecutiveBridges++;
-              }
+                const next = {
+                  name: payload.tracks[i + 1].trackName,
+                  artist: payload.tracks[i + 1].artist,
+                  tags: state.getTrackMeta(payload.tracks[i + 1].trackId)?.tags || '',
+                };
 
-              // Back announce (~50% probability)
-              if (Math.random() < 0.5) {
-                const backSeg = segmentEngine.buildBackAnnounceSegment(prev, i, `refill${batchId}`);
-                await segmentEngine.resolveSegmentTTS(backSeg);
-                state.addSegment(`after_track:refill:${batchId}:${i}`, backSeg);
-                this.broadcast({ type: 'segment-ready', data: backSeg });
+                // Silence check
+                const silenceResult = segmentEngine.shouldSilence({
+                  prevSong: prev, nextSong: next, consecutiveBridges,
+                });
+
+                if (silenceResult.shouldSilence) {
+                  const silenceSeg = segmentEngine.buildSilenceSegment(i, silenceResult.reason, `refill${payload.batchId}`);
+                  state.addSegment(`between_tracks:refill:${payload.batchId}:${i}`, silenceSeg);
+                  broadcast({ type: 'segment-ready', data: silenceSeg });
+                  consecutiveBridges = 0;
+                } else {
+                  const bridgeInfo = segmentEngine.generateBridgeText(prev, next);
+                  const bridgeSeg = {
+                    id: `seg:bridge:refill:${payload.batchId}:${i}`,
+                    type: 'bridge',
+                    position: 'between_tracks',
+                    anchorTrackIndex: i,
+                    text: bridgeInfo.text,
+                    ttsUrl: null,
+                    ttsStatus: 'pending',
+                    transitionStyle: bridgeInfo.transitionStyle,
+                    metadata: { prevSong: prev, nextSong: next },
+                  };
+                  await segmentEngine.resolveSegmentTTS(bridgeSeg);
+                  state.addSegment(`between_tracks:refill:${payload.batchId}:${i}`, bridgeSeg);
+                  broadcast({ type: 'segment-ready', data: bridgeSeg });
+                  consecutiveBridges++;
+                }
+
+                // Back announce (~50% probability)
+                if (Math.random() < 0.5) {
+                  const backSeg = segmentEngine.buildBackAnnounceSegment(prev, i, `refill${payload.batchId}`);
+                  await segmentEngine.resolveSegmentTTS(backSeg);
+                  state.addSegment(`after_track:refill:${payload.batchId}:${i}`, backSeg);
+                  broadcast({ type: 'segment-ready', data: backSeg });
+                }
               }
-            }
-          })().catch(err => logger.warn('SCHEDULER', `Refill segment generation failed: ${err.message}`));
+            },
+          });
         }
       } else {
         logger.warn('SCHEDULER', 'Rolling queue refill: no tracks resolved');

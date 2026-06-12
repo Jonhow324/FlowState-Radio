@@ -14,6 +14,7 @@ const tts = require('../tts');
 const scheduler = require('../scheduler');
 const filler = require('../services/filler');
 const segmentEngine = require('../services/segmentEngine');
+const jobQueue = require('../services/jobQueue');
 
 // Singleton brain instance
 const brain = new Brain(config);
@@ -343,8 +344,28 @@ router.post('/', async (req, res) => {
           if (!ncmAvailable) {
             logger.warn('CHAT', 'NCM unhealthy — skipping song resolution, returning DJ text only');
           } else {
+            // ── Phase 3: Four-layer dedup before NCM resolution ──
+            let songsToResolve = aiResult.songs;
+            try {
+              const queueTracks = state.getQueue();
+              const queueIds = new Set(queueTracks.map(q => q.track_id));
+              const recentPlays = state.getRecentPlaysForDedup(50);
+              const dedupState = {
+                batchIds: new Set(),
+                queueIds,
+                recentPlays,
+              };
+              const dedupResult = segmentEngine.dedupFilter(aiResult.songs, dedupState);
+              songsToResolve = dedupResult.accepted;
+              if (dedupResult.rejected.length > 0) {
+                logger.info('CHAT', `Dedup filtered ${dedupResult.rejected.length} songs: ${dedupResult.rejected.map(r => r.reason).join(', ')}`);
+              }
+            } catch (dedupErr) {
+              logger.warn('CHAT', `Dedup check failed, using unfiltered songs: ${dedupErr.message}`);
+            }
+
             // New format: [{name, artist, ncmTrackId?}] — resolve each song
-            for (const song of aiResult.songs) {
+            for (const song of songsToResolve) {
               try {
                 // Fast path: use pre-resolved NCM track ID from vector store
                 if (song.ncmTrackId) {
@@ -415,25 +436,36 @@ router.post('/', async (req, res) => {
             const segMap = segmentEngine.buildSegmentMap(normalizedSegments);
             state.setSegments(segMap);
             logger.info('CHAT', `Segments normalized: ${normalizedSegments.length} (${normalizedSegments.map(s => s.type).join(', ')})`);
+          }
 
-            // Async bridge + back_announce + silence post-generation
-            if (broadcast) {
-              (async () => {
+          // ── Phase 3: Enqueue bridge + back_announce + silence generation ──
+          if (broadcast && resolvedTracks.length > 1) {
+            const tracksSnapshot = resolvedTracks.map(t => ({
+              trackId: t.trackId,
+              trackName: t.trackName || t.name,
+              artist: t.artist,
+            }));
+
+            jobQueue.enqueue({
+              type: 'bridge_generation',
+              dedupKey: `bridge:chat:${Date.now()}:${process.hrtime.bigint()}`,
+              payload: { tracks: tracksSnapshot },
+              execute: async (payload) => {
                 let consecutiveBridges = 0;
 
-                for (let i = 0; i < resolvedTracks.length - 1; i++) {
+                for (let i = 0; i < payload.tracks.length - 1; i++) {
                   const prev = {
-                    name: resolvedTracks[i].trackName || resolvedTracks[i].name,
-                    artist: resolvedTracks[i].artist,
-                    tags: state.getTrackMeta(resolvedTracks[i].trackId)?.tags || '',
+                    name: payload.tracks[i].trackName,
+                    artist: payload.tracks[i].artist,
+                    tags: state.getTrackMeta(payload.tracks[i].trackId)?.tags || '',
                   };
                   const next = {
-                    name: resolvedTracks[i + 1].trackName || resolvedTracks[i + 1].name,
-                    artist: resolvedTracks[i + 1].artist,
-                    tags: state.getTrackMeta(resolvedTracks[i + 1].trackId)?.tags || '',
+                    name: payload.tracks[i + 1].trackName,
+                    artist: payload.tracks[i + 1].artist,
+                    tags: state.getTrackMeta(payload.tracks[i + 1].trackId)?.tags || '',
                   };
 
-                  // ── Silence check: replace bridge with silence if appropriate ──
+                  // Silence check
                   const silenceResult = segmentEngine.shouldSilence({
                     prevSong: prev, nextSong: next, consecutiveBridges,
                   });
@@ -442,9 +474,8 @@ router.post('/', async (req, res) => {
                     const silenceSeg = segmentEngine.buildSilenceSegment(i, silenceResult.reason, 'chat');
                     state.addSegment(`between_tracks:${i}`, silenceSeg);
                     broadcast({ type: 'segment-ready', data: silenceSeg });
-                    consecutiveBridges = 0; // silence resets the counter
+                    consecutiveBridges = 0;
                   } else {
-                    // Generate bridge
                     const bridgeInfo = segmentEngine.generateBridgeText(prev, next);
                     const bridgeSeg = {
                       id: `seg:bridge:${i}:post`,
@@ -463,7 +494,7 @@ router.post('/', async (req, res) => {
                     consecutiveBridges++;
                   }
 
-                  // ── Back announce: generate for ~50% of tracks ──
+                  // Back announce (~50% probability)
                   if (Math.random() < 0.5) {
                     const backSeg = segmentEngine.buildBackAnnounceSegment(prev, i, 'chat');
                     await segmentEngine.resolveSegmentTTS(backSeg);
@@ -473,12 +504,12 @@ router.post('/', async (req, res) => {
                 }
 
                 // Last track: also consider back_announce
-                if (resolvedTracks.length > 0) {
-                  const lastIdx = resolvedTracks.length - 1;
+                if (payload.tracks.length > 0) {
+                  const lastIdx = payload.tracks.length - 1;
                   const lastTrack = {
-                    name: resolvedTracks[lastIdx].trackName || resolvedTracks[lastIdx].name,
-                    artist: resolvedTracks[lastIdx].artist,
-                    tags: state.getTrackMeta(resolvedTracks[lastIdx].trackId)?.tags || '',
+                    name: payload.tracks[lastIdx].trackName,
+                    artist: payload.tracks[lastIdx].artist,
+                    tags: state.getTrackMeta(payload.tracks[lastIdx].trackId)?.tags || '',
                   };
                   if (Math.random() < 0.4) {
                     const lastBack = segmentEngine.buildBackAnnounceSegment(lastTrack, lastIdx, 'chat-last');
@@ -487,8 +518,8 @@ router.post('/', async (req, res) => {
                     broadcast({ type: 'segment-ready', data: lastBack });
                   }
                 }
-              })().catch(err => logger.warn('CHAT', `Segment generation failed: ${err.message}`));
-            }
+              },
+            });
           }
 
           // Play the first one immediately

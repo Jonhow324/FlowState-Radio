@@ -11,6 +11,7 @@ const ncm = require('../services/ncm');
 const scheduler = require('../scheduler');
 const filler = require('../services/filler');
 const logger = require('../utils/logger');
+const jobQueue = require('../services/jobQueue');
 
 /**
  * POST /api/player/play
@@ -338,6 +339,18 @@ router.post('/volume', (req, res) => {
   state.updateCurrentState({ volume });
   logger.info('PLAYER', `Volume: ${volume}`);
   res.json({ success: true, volume });
+});
+
+/**
+ * GET /api/player/job-stats
+ * Job queue statistics for monitoring
+ */
+router.get('/job-stats', (req, res) => {
+  res.json({
+    success: true,
+    stats: jobQueue.getStats(),
+    pending: jobQueue.getPending(),
+  });
 });
 
 module.exports = router;

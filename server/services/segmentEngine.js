@@ -137,36 +137,43 @@ function generateBridgeText(prevSong, nextSong, options = {}) {
 
 // ── LLM Bridge Generation ────────────────────────────────────
 
+// Shallow prompt: brief one-sentence transition
+const SHALLOW_SYSTEM_PROMPT = [
+  '你是一个私人音乐电台DJ，风格温暖、自然、不做作。',
+  '你的任务是用一句话串联两首歌之间的过渡，让听众觉得音乐在自然流动。',
+  '',
+  '要求：',
+  '- 只输出一句话（15-60字），不要引号、不要前缀',
+  '- 可以提到歌名、歌手、情绪、风格上的联系',
+  '- 语气像朋友在耳边轻声说话，不要播音腔',
+  '- 不要用"让我们"、"接下来"这类套话开头',
+  '- 禁止使用 emoji',
+].join('\n');
+
+// Deep prompt: expanded commentary with personal angle
+const DEEP_SYSTEM_PROMPT = [
+  '你是一个私人音乐电台DJ，风格温暖、有见地、真诚。',
+  '你觉得这首歌特别契合当下的氛围，想和听众多聊几句。',
+  '',
+  '请从以下角度中自然选择一个展开（不要列出角度名称，直接说）：',
+  '1. 这首歌或歌手背后的创作故事、有趣轶事',
+  '2. 音乐中值得细细品味的细节（某段旋律、编曲、歌词的妙处）',
+  '3. 这首歌带来的情绪共鸣，为什么此刻听它格外动人',
+  '4. 歌曲和当下场景/时间/心境的独特联系',
+  '',
+  '要求：',
+  '- 2-4句话（60-200字），像跟老朋友聊天',
+  '- 要有具体的细节，不要空泛的赞美或套话',
+  '- 不要引号、不要前缀、不要列点',
+  '- 禁止使用 emoji',
+  '- 第一句话要自然衔接上一首歌，后面的话展开聊下一首',
+  '- 语气真诚，像真的在分享自己对音乐的感受',
+].join('\n');
+
 /**
- * Generate a bridge segment between two songs using LLM (DeepSeek rawChat).
- * Falls back to template-based generateBridgeText() on any failure.
- *
- * @param {object} prevSong - { name, artist, tags? }
- * @param {object} nextSong - { name, artist, tags? }
- * @param {object} deepseek - DeepSeekAdapter instance (must have rawChat)
- * @param {object} [options] - { temperature, maxTokens, timeout }
- * @returns {Promise<{ text: string, transitionStyle: string, source: 'llm'|'template' }>}
+ * Build user prompt with song context for bridge generation.
  */
-async function generateBridgeLLM(prevSong, nextSong, deepseek, options = {}) {
-  const fallback = generateBridgeText(prevSong, nextSong);
-
-  // Guard: if deepseek is not provided or rawChat is missing, fall back
-  if (!deepseek || typeof deepseek.rawChat !== 'function') {
-    return { ...fallback, source: 'template' };
-  }
-
-  const systemPrompt = [
-    '你是一个私人音乐电台DJ，风格温暖、自然、不做作。',
-    '你的任务是用一句话串联两首歌之间的过渡，让听众觉得音乐在自然流动。',
-    '',
-    '要求：',
-    '- 只输出一句话（15-60字），不要引号、不要前缀',
-    '- 可以提到歌名、歌手、情绪、风格上的联系',
-    '- 语气像朋友在耳边轻声说话，不要播音腔',
-    '- 不要用"让我们"、"接下来"这类套话开头',
-    '- 禁止使用 emoji',
-  ].join('\n');
-
+function _buildBridgeUserPrompt(prevSong, nextSong) {
   const prevName = prevSong.name || prevSong.trackName || '未知';
   const prevArtist = prevSong.artist || '未知';
   const nextName = nextSong.name || nextSong.trackName || '未知';
@@ -176,26 +183,66 @@ async function generateBridgeLLM(prevSong, nextSong, deepseek, options = {}) {
   if (prevSong.tags) userPrompt += `\n标签：${prevSong.tags}`;
   userPrompt += `\n下一首：${nextArtist} -《${nextName}》`;
   if (nextSong.tags) userPrompt += `\n标签：${nextSong.tags}`;
+  return userPrompt;
+}
+
+/**
+ * Generate a bridge segment between two songs using LLM (DeepSeek rawChat).
+ * Supports two modes:
+ *   - shallow: brief one-sentence transition (default, ~75% of bridges)
+ *   - deep: expanded 2-4 sentence commentary with personal angle (~25%)
+ *
+ * The depth mode is determined internally via shouldExpand() unless overridden.
+ * Falls back to template-based generateBridgeText() on any failure.
+ *
+ * @param {object} prevSong - { name, artist, tags? }
+ * @param {object} nextSong - { name, artist, tags? }
+ * @param {object} deepseek - DeepSeekAdapter instance (must have rawChat)
+ * @param {object} [options] - { temperature, maxTokens, timeout, depth: 'shallow'|'deep'|'auto', expandContext }
+ * @returns {Promise<{ text, transitionStyle, source, depth }>}
+ */
+async function generateBridgeLLM(prevSong, nextSong, deepseek, options = {}) {
+  const fallback = generateBridgeText(prevSong, nextSong);
+
+  // Guard: if deepseek is not provided or rawChat is missing, fall back
+  if (!deepseek || typeof deepseek.rawChat !== 'function') {
+    return { ...fallback, source: 'template', depth: 'shallow' };
+  }
+
+  // Determine depth
+  let depth = options.depth || 'auto';
+  if (depth === 'auto') {
+    const expandResult = shouldExpand(options.expandContext || {});
+    depth = expandResult.shouldExpand ? 'deep' : 'shallow';
+  }
+
+  const isDeep = depth === 'deep';
+  const systemPrompt = isDeep ? DEEP_SYSTEM_PROMPT : SHALLOW_SYSTEM_PROMPT;
+  const userPrompt = _buildBridgeUserPrompt(prevSong, nextSong);
+
+  const rawOptions = {
+    temperature: options.temperature ?? (isDeep ? 0.85 : 0.9),
+    maxTokens: options.maxTokens ?? (isDeep ? 250 : 100),
+    timeout: options.timeout ?? (isDeep ? 18000 : 12000),
+  };
 
   try {
-    const text = await deepseek.rawChat(systemPrompt, userPrompt, {
-      temperature: options.temperature ?? 0.9,
-      maxTokens: options.maxTokens ?? 100,
-      timeout: options.timeout ?? 12000,
-    });
+    const text = await deepseek.rawChat(systemPrompt, userPrompt, rawOptions);
 
-    // Validate: not empty, not too long (Chinese chars count as ~1)
+    // Validate and clean
     const cleaned = text.replace(/^["'"「『【]+/, '').replace(/["'"」』】]+$/, '').trim();
-    if (!cleaned || cleaned.length < 5 || cleaned.length > 120) {
-      logger.warn('SEGMENT', `LLM bridge too short/long (${cleaned.length} chars), falling back`);
-      return { ...fallback, source: 'template' };
+    const minLen = isDeep ? 20 : 5;
+    const maxLen = isDeep ? 300 : 120;
+
+    if (!cleaned || cleaned.length < minLen || cleaned.length > maxLen) {
+      logger.warn('SEGMENT', `LLM bridge (${depth}) ${cleaned.length} chars out of [${minLen},${maxLen}], falling back`);
+      return { ...fallback, source: 'template', depth: 'shallow' };
     }
 
-    // If LLM accidentally included the song names in a template-like way, still accept
-    return { text: cleaned, transitionStyle: 'outro', source: 'llm' };
+    return { text: cleaned, transitionStyle: 'outro', source: 'llm', depth };
   } catch (err) {
-    logger.warn('SEGMENT', `LLM bridge generation failed: ${err.message}, falling back to template`);
-    return { ...fallback, source: 'template' };
+    logger.warn('SEGMENT', `LLM bridge (${depth}) failed: ${err.message}, falling back to template`);
+    return { ...fallback, source: 'template', depth: 'shallow' };
   }
 }
 
@@ -293,6 +340,64 @@ function shouldSilence(context = {}) {
   }
 
   return { shouldSilence: false, reason: null };
+}
+
+// ── Expansion Scoring ─────────────────────────────────────────
+
+const EXPAND_CONFIG = {
+  baseProbability: 0.25,            // ~25% base chance of expansion
+  emotionalBoost: 0.20,             // +20% for emotional/ambient/classical tags
+  nightBoost: 0.15,                 // +15% during late night hours (22:00-05:00)
+  consecutiveExpandedLimit: 1,      // Never expand 2 bridges in a row
+  minGapBetweenExpansions: 2,       // At least 2 normal bridges between expansions
+};
+
+/**
+ * Decide whether this bridge should be an "expanded" deep commentary.
+ * Target: ~20-30% of bridges get expanded, with guards against consecutive expansions.
+ *
+ * @param {object} context
+ * @param {object} [context.nextSong] - { name, artist, tags?, mood? }
+ * @param {number} [context.consecutiveExpanded] - How many expanded bridges in a row (0 or 1)
+ * @param {number} [context.bridgesSinceLastExpand] - Normal bridges since last expansion
+ * @param {number} [context.hour] - Current hour (0-23)
+ * @returns {{ shouldExpand: boolean, probability: number, reason: string }}
+ */
+function shouldExpand(context = {}) {
+  const { consecutiveExpanded = 0, bridgesSinceLastExpand = 0 } = context;
+  const hour = typeof context.hour === 'number' ? context.hour : new Date().getHours();
+
+  // Hard guard: never expand 2 in a row
+  if (consecutiveExpanded >= EXPAND_CONFIG.consecutiveExpandedLimit) {
+    return { shouldExpand: false, probability: 0, reason: 'consecutive_limit' };
+  }
+
+  // Hard guard: need breathing room after last expansion
+  if (bridgesSinceLastExpand < EXPAND_CONFIG.minGapBetweenExpansions) {
+    return { shouldExpand: false, probability: 0, reason: 'too_soon' };
+  }
+
+  // Calculate probability
+  let probability = EXPAND_CONFIG.baseProbability;
+
+  // Boost for emotional/ambient songs
+  const nextTags = ((context.nextSong?.tags || '') + ' ' + (context.nextSong?.mood || '')).toLowerCase();
+  if (SILENCE_CONFIG.emotionalTags.some(t => nextTags.includes(t))) {
+    probability += EXPAND_CONFIG.emotionalBoost;
+  }
+
+  // Boost for late night hours (more intimate, more room for depth)
+  const isLateNight = hour >= 22 || hour < 5;
+  if (isLateNight) {
+    probability += EXPAND_CONFIG.nightBoost;
+  }
+
+  const expand = Math.random() < probability;
+  return {
+    shouldExpand: expand,
+    probability: Math.round(probability * 100) / 100,
+    reason: expand ? 'selected' : 'probability',
+  };
 }
 
 // ── Shared Helpers ────────────────────────────────────────────
@@ -495,6 +600,7 @@ module.exports = {
   generateBridgeLLM,
   generateBackAnnounce,
   shouldSilence,
+  shouldExpand,
   resolveSegmentTTS,
   dedupCheck,
   dedupFilter,
@@ -505,4 +611,5 @@ module.exports = {
   VALID_TYPES,
   VALID_POSITIONS,
   SILENCE_CONFIG,
+  EXPAND_CONFIG,
 };

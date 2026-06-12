@@ -452,6 +452,8 @@ router.post('/', async (req, res) => {
               payload: { tracks: tracksSnapshot },
               execute: async (payload) => {
                 let consecutiveBridges = 0;
+                let consecutiveExpanded = 0;
+                let bridgesSinceLastExpand = 0;
 
                 for (let i = 0; i < payload.tracks.length - 1; i++) {
                   const prev = {
@@ -475,9 +477,12 @@ router.post('/', async (req, res) => {
                     state.addSegment(`between_tracks:${i}`, silenceSeg);
                     broadcast({ type: 'segment-ready', data: silenceSeg });
                     consecutiveBridges = 0;
+                    bridgesSinceLastExpand++;
                   } else {
-                    const bridgeInfo = await segmentEngine.generateBridgeLLM(prev, next, brain.deepseek);
-                    logger.info('CHAT', `Bridge[${i}] (${bridgeInfo.source}): "${bridgeInfo.text}"`);
+                    const bridgeInfo = await segmentEngine.generateBridgeLLM(prev, next, brain.deepseek, {
+                      expandContext: { nextSong: next, consecutiveExpanded, bridgesSinceLastExpand },
+                    });
+                    logger.info('CHAT', `Bridge[${i}] (${bridgeInfo.source}/${bridgeInfo.depth}): "${bridgeInfo.text.slice(0, 50)}..."`);
                     const bridgeSeg = {
                       id: `seg:bridge:${i}:post`,
                       type: 'bridge',
@@ -487,12 +492,21 @@ router.post('/', async (req, res) => {
                       ttsUrl: null,
                       ttsStatus: 'pending',
                       transitionStyle: bridgeInfo.transitionStyle,
-                      metadata: { prevSong: prev, nextSong: next, bridgeSource: bridgeInfo.source },
+                      metadata: { prevSong: prev, nextSong: next, bridgeSource: bridgeInfo.source, depth: bridgeInfo.depth },
                     };
                     await segmentEngine.resolveSegmentTTS(bridgeSeg);
                     state.addSegment(`between_tracks:${i}`, bridgeSeg);
                     broadcast({ type: 'segment-ready', data: bridgeSeg });
                     consecutiveBridges++;
+
+                    // Update expansion state
+                    if (bridgeInfo.depth === 'deep') {
+                      consecutiveExpanded++;
+                      bridgesSinceLastExpand = 0;
+                    } else {
+                      consecutiveExpanded = 0;
+                      bridgesSinceLastExpand++;
+                    }
                   }
 
                   // Back announce (~50% probability)

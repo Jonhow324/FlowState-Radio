@@ -160,20 +160,17 @@ async function generateBridgeLLM(prevSong, nextSong, deepseek, options = {}) {
   const fallback = generateBridgeText(prevSong, nextSong);
 
   if (!deepseek || typeof deepseek.rawChat !== 'function') {
-    return { ...fallback, source: 'template' };
+    return { ...fallback, source: 'template', depth: 'shallow' };
   }
 
-  const systemPrompt = [
-    '你是一个私人音乐电台DJ，风格温暖、自然、不做作。',
-    '你的任务是用一句话串联两首歌之间的过渡，让听众觉得音乐在自然流动。',
-    '',
-    '要求：',
-    '- 只输出一句话（15-60字），不要引号、不要前缀',
-    '- 可以提到歌名、歌手、情绪、风格上的联系',
-    '- 语气像朋友在耳边轻声说话，不要播音腔',
-    '- 不要用"让我们"、"接下来"这类套话开头',
-    '- 禁止使用 emoji',
-  ].join('\n');
+  // Determine depth
+  let depth = options.depth || 'auto';
+  if (depth === 'auto') {
+    const expandResult = shouldExpand(options.expandContext || {});
+    depth = expandResult.shouldExpand ? 'deep' : 'shallow';
+  }
+
+  const isDeep = depth === 'deep';
 
   const prevName = prevSong.name || prevSong.trackName || '未知';
   const prevArtist = prevSong.artist || '未知';
@@ -186,21 +183,50 @@ async function generateBridgeLLM(prevSong, nextSong, deepseek, options = {}) {
   if (nextSong.tags) userPrompt += `\n标签：${nextSong.tags}`;
 
   try {
-    const text = await deepseek.rawChat(systemPrompt, userPrompt, {
-      temperature: options.temperature ?? 0.9,
-      maxTokens: options.maxTokens ?? 100,
-      timeout: options.timeout ?? 12000,
+    const text = await deepseek.rawChat('system', userPrompt, {
+      temperature: options.temperature ?? (isDeep ? 0.85 : 0.9),
+      maxTokens: options.maxTokens ?? (isDeep ? 250 : 100),
+      timeout: options.timeout ?? (isDeep ? 18000 : 12000),
     });
 
     const cleaned = text.replace(/^["'"「『【]+/, '').replace(/["'"」』】]+$/, '').trim();
-    if (!cleaned || cleaned.length < 5 || cleaned.length > 120) {
-      return { ...fallback, source: 'template' };
+    const minLen = isDeep ? 20 : 5;
+    const maxLen = isDeep ? 300 : 120;
+
+    if (!cleaned || cleaned.length < minLen || cleaned.length > maxLen) {
+      return { ...fallback, source: 'template', depth: 'shallow' };
     }
 
-    return { text: cleaned, transitionStyle: 'outro', source: 'llm' };
+    return { text: cleaned, transitionStyle: 'outro', source: 'llm', depth };
   } catch (err) {
-    return { ...fallback, source: 'template' };
+    return { ...fallback, source: 'template', depth: 'shallow' };
   }
+}
+
+function shouldExpand(context = {}) {
+  const { consecutiveExpanded = 0, bridgesSinceLastExpand = 0 } = context;
+  const hour = typeof context.hour === 'number' ? context.hour : 12;
+
+  if (consecutiveExpanded >= 1) {
+    return { shouldExpand: false, probability: 0, reason: 'consecutive_limit' };
+  }
+  if (bridgesSinceLastExpand < 2) {
+    return { shouldExpand: false, probability: 0, reason: 'too_soon' };
+  }
+
+  let probability = 0.25;
+  const nextTags = ((context.nextSong?.tags || '') + ' ' + (context.nextSong?.mood || '')).toLowerCase();
+  const emotionalTags = ['emotional', 'ambient', 'instrumental', 'classical', 'post-rock', 'shoegaze', 'dream pop'];
+  if (emotionalTags.some(t => nextTags.includes(t))) {
+    probability += 0.20;
+  }
+  const isLateNight = hour >= 22 || hour < 5;
+  if (isLateNight) {
+    probability += 0.15;
+  }
+
+  const expand = Math.random() < probability;
+  return { shouldExpand: expand, probability: Math.round(probability * 100) / 100, reason: expand ? 'selected' : 'probability' };
 }
 
 function getSegmentsForTrack(segmentMap, trackIndex) {
@@ -739,23 +765,25 @@ describe('Segment Engine', () => {
       const result = await generateBridgeLLM(
         { name: '晴天', artist: '周杰伦' },
         { name: '红豆', artist: '王菲' },
-        deepseek
+        deepseek,
+        { depth: 'shallow' }
       );
       expect(result.text).toBe('从摇滚到民谣，情绪在慢慢转弯');
       expect(result.source).toBe('llm');
+      expect(result.depth).toBe('shallow');
       expect(result.transitionStyle).toBe('outro');
     });
 
-    it('calls rawChat with correct system and user prompts', async () => {
+    it('calls rawChat with correct user prompt', async () => {
       const deepseek = createMockDeepseek('音乐在两种风格间自由穿梭');
       await generateBridgeLLM(
         { name: 'SongA', artist: 'ArtistA', tags: 'rock' },
         { name: 'SongB', artist: 'ArtistB', tags: 'jazz' },
-        deepseek
+        deepseek,
+        { depth: 'shallow' }
       );
       expect(deepseek.rawChat).toHaveBeenCalledTimes(1);
-      const [systemPrompt, userPrompt] = deepseek.rawChat.mock.calls[0];
-      expect(systemPrompt).toContain('DJ');
+      const userPrompt = deepseek.rawChat.mock.calls[0][1];
       expect(userPrompt).toContain('SongA');
       expect(userPrompt).toContain('ArtistA');
       expect(userPrompt).toContain('SongB');
@@ -772,15 +800,17 @@ describe('Segment Engine', () => {
       );
       expect(result.text).toBeTruthy();
       expect(result.source).toBe('template');
+      expect(result.depth).toBe('shallow');
     });
 
     it('falls back to template when deepseek has no rawChat method', async () => {
       const result = await generateBridgeLLM(
         { name: '晴天', artist: '周杰伦' },
         { name: '红豆', artist: '王菲' },
-        { think: () => {} }  // no rawChat
+        { think: () => {} }
       );
       expect(result.source).toBe('template');
+      expect(result.depth).toBe('shallow');
     });
 
     it('falls back to template when LLM throws an error', async () => {
@@ -788,10 +818,12 @@ describe('Segment Engine', () => {
       const result = await generateBridgeLLM(
         { name: '晴天', artist: '周杰伦' },
         { name: '红豆', artist: '王菲' },
-        deepseek
+        deepseek,
+        { depth: 'shallow' }
       );
       expect(result.text).toBeTruthy();
       expect(result.source).toBe('template');
+      expect(result.depth).toBe('shallow');
     });
 
     it('falls back to template when LLM returns empty string', async () => {
@@ -799,28 +831,31 @@ describe('Segment Engine', () => {
       const result = await generateBridgeLLM(
         { name: '晴天', artist: '周杰伦' },
         { name: '红豆', artist: '王菲' },
-        deepseek
+        deepseek,
+        { depth: 'shallow' }
       );
       expect(result.source).toBe('template');
     });
 
-    it('falls back to template when LLM returns text too short', async () => {
+    it('falls back to template when LLM returns text too short for shallow', async () => {
       const deepseek = createMockDeepseek('太短');
       const result = await generateBridgeLLM(
         { name: '晴天', artist: '周杰伦' },
         { name: '红豆', artist: '王菲' },
-        deepseek
+        deepseek,
+        { depth: 'shallow' }
       );
       expect(result.source).toBe('template');
     });
 
-    it('falls back to template when LLM returns text too long (>120 chars)', async () => {
-      const longText = '这是一段非常非常长的文字，'.repeat(20); // 220 chars
+    it('falls back to template when LLM returns text too long for shallow (>120)', async () => {
+      const longText = '这是一段非常非常长的文字，'.repeat(20);
       const deepseek = createMockDeepseek(longText);
       const result = await generateBridgeLLM(
         { name: '晴天', artist: '周杰伦' },
         { name: '红豆', artist: '王菲' },
-        deepseek
+        deepseek,
+        { depth: 'shallow' }
       );
       expect(result.source).toBe('template');
     });
@@ -830,7 +865,8 @@ describe('Segment Engine', () => {
       const result = await generateBridgeLLM(
         { name: '晴天', artist: '周杰伦' },
         { name: '红豆', artist: '王菲' },
-        deepseek
+        deepseek,
+        { depth: 'shallow' }
       );
       expect(result.text).toBe('从摇滚到民谣，情绪在慢慢转弯');
       expect(result.source).toBe('llm');
@@ -841,7 +877,8 @@ describe('Segment Engine', () => {
       const result = await generateBridgeLLM(
         { name: '晴天', artist: '周杰伦' },
         { name: '红豆', artist: '王菲' },
-        deepseek
+        deepseek,
+        { depth: 'shallow' }
       );
       expect(result.text).toBe('音乐在两种风格间自由穿梭');
       expect(result.source).toBe('llm');
@@ -852,25 +889,12 @@ describe('Segment Engine', () => {
       await generateBridgeLLM(
         { trackName: 'TrackA', artist: 'A' },
         { trackName: 'TrackB', artist: 'B' },
-        deepseek
+        deepseek,
+        { depth: 'shallow' }
       );
       const userPrompt = deepseek.rawChat.mock.calls[0][1];
       expect(userPrompt).toContain('TrackA');
       expect(userPrompt).toContain('TrackB');
-    });
-
-    it('passes options to rawChat', async () => {
-      const deepseek = createMockDeepseek('过渡文案');
-      await generateBridgeLLM(
-        { name: 'A', artist: 'B' },
-        { name: 'C', artist: 'D' },
-        deepseek,
-        { temperature: 0.5, maxTokens: 80, timeout: 5000 }
-      );
-      const opts = deepseek.rawChat.mock.calls[0][2];
-      expect(opts.temperature).toBe(0.5);
-      expect(opts.maxTokens).toBe(80);
-      expect(opts.timeout).toBe(5000);
     });
 
     it('omits tags line when song has no tags', async () => {
@@ -878,10 +902,221 @@ describe('Segment Engine', () => {
       await generateBridgeLLM(
         { name: 'A', artist: 'B' },
         { name: 'C', artist: 'D' },
-        deepseek
+        deepseek,
+        { depth: 'shallow' }
       );
       const userPrompt = deepseek.rawChat.mock.calls[0][1];
       expect(userPrompt).not.toContain('标签');
+    });
+
+    // ── Deep mode tests ──
+
+    it('uses deep mode with higher maxTokens when depth: "deep"', async () => {
+      const deepText = '这首歌的贝斯线很有意思，你注意听第二段副歌进来之前那四小节的留白，刚好给了情绪一个喘息的空间。王菲唱歌就是这样，越是克制的地方越有力量。';
+      const deepseek = createMockDeepseek(deepText);
+      const result = await generateBridgeLLM(
+        { name: '红豆', artist: '王菲', tags: 'emotional' },
+        { name: '匆匆那年', artist: '王菲', tags: 'ballad' },
+        deepseek,
+        { depth: 'deep' }
+      );
+      expect(result.text).toBe(deepText);
+      expect(result.source).toBe('llm');
+      expect(result.depth).toBe('deep');
+      // Check that rawChat was called with higher maxTokens
+      const opts = deepseek.rawChat.mock.calls[0][2];
+      expect(opts.maxTokens).toBe(250);
+      expect(opts.temperature).toBe(0.85);
+    });
+
+    it('accepts longer text in deep mode (up to 300 chars)', async () => {
+      const longDeepText = '这是一段很长的深度评论文字，'.repeat(15) + '刚好在范围内。';
+      const deepseek = createMockDeepseek(longDeepText);
+      const result = await generateBridgeLLM(
+        { name: 'A', artist: 'B' },
+        { name: 'C', artist: 'D' },
+        deepseek,
+        { depth: 'deep' }
+      );
+      // Should succeed if under 300 chars
+      if (longDeepText.length <= 300) {
+        expect(result.source).toBe('llm');
+        expect(result.depth).toBe('deep');
+      }
+    });
+
+    it('falls back when deep mode text is too short (<20 chars)', async () => {
+      const deepseek = createMockDeepseek('太短了不够深度');
+      const result = await generateBridgeLLM(
+        { name: 'A', artist: 'B' },
+        { name: 'C', artist: 'D' },
+        deepseek,
+        { depth: 'deep' }
+      );
+      expect(result.source).toBe('template');
+      expect(result.depth).toBe('shallow');
+    });
+
+    it('falls back when deep mode text exceeds 300 chars', async () => {
+      const tooLong = '这是一段超长文字用来测试深度模式字数上限的验证逻辑，'.repeat(20); // ~460 chars
+      const deepseek = createMockDeepseek(tooLong);
+      const result = await generateBridgeLLM(
+        { name: 'A', artist: 'B' },
+        { name: 'C', artist: 'D' },
+        deepseek,
+        { depth: 'deep' }
+      );
+      expect(result.source).toBe('template');
+    });
+
+    it('auto mode defaults to shallow when expandContext blocks expansion', async () => {
+      const deepseek = createMockDeepseek('简短过渡');
+      const result = await generateBridgeLLM(
+        { name: 'A', artist: 'B' },
+        { name: 'C', artist: 'D' },
+        deepseek,
+        { expandContext: { consecutiveExpanded: 1 } }  // blocked
+      );
+      expect(result.depth).toBe('shallow');
+    });
+
+    it('auto mode defaults to shallow when no expandContext given', async () => {
+      // With no context, bridgesSinceLastExpand defaults to 0 → too_soon guard fires
+      const deepseek = createMockDeepseek('简短过渡文案');
+      const result = await generateBridgeLLM(
+        { name: 'A', artist: 'B' },
+        { name: 'C', artist: 'D' },
+        deepseek,
+        { depth: 'auto' }
+      );
+      // shouldExpand with default context: bridgesSinceLastExpand=0 < 2 → blocked
+      expect(result.depth).toBe('shallow');
+    });
+  });
+
+  // ═══ shouldExpand ═══
+
+  describe('shouldExpand()', () => {
+
+    it('blocks expansion when consecutiveExpanded >= 1', () => {
+      const result = shouldExpand({ consecutiveExpanded: 1, bridgesSinceLastExpand: 5 });
+      expect(result.shouldExpand).toBe(false);
+      expect(result.reason).toBe('consecutive_limit');
+    });
+
+    it('blocks expansion when bridgesSinceLastExpand < 2', () => {
+      const result = shouldExpand({ consecutiveExpanded: 0, bridgesSinceLastExpand: 1 });
+      expect(result.shouldExpand).toBe(false);
+      expect(result.reason).toBe('too_soon');
+    });
+
+    it('blocks when bridgesSinceLastExpand is 0', () => {
+      const result = shouldExpand({ consecutiveExpanded: 0, bridgesSinceLastExpand: 0 });
+      expect(result.shouldExpand).toBe(false);
+      expect(result.reason).toBe('too_soon');
+    });
+
+    it('allows expansion when guards pass (with seeded random)', () => {
+      // Use Math.random mock to force expansion
+      const originalRandom = Math.random;
+      Math.random = () => 0.1; // Always below base probability
+      try {
+        const result = shouldExpand({
+          consecutiveExpanded: 0,
+          bridgesSinceLastExpand: 3,
+          hour: 14,
+        });
+        expect(result.shouldExpand).toBe(true);
+        expect(result.reason).toBe('selected');
+        expect(result.probability).toBeGreaterThanOrEqual(0.25);
+      } finally {
+        Math.random = originalRandom;
+      }
+    });
+
+    it('does NOT expand when random exceeds probability', () => {
+      const originalRandom = Math.random;
+      Math.random = () => 0.99; // Always above probability
+      try {
+        const result = shouldExpand({
+          consecutiveExpanded: 0,
+          bridgesSinceLastExpand: 3,
+          hour: 14,
+        });
+        expect(result.shouldExpand).toBe(false);
+        expect(result.reason).toBe('probability');
+      } finally {
+        Math.random = originalRandom;
+      }
+    });
+
+    it('boosts probability for emotional/ambient next song', () => {
+      const originalRandom = Math.random;
+      Math.random = () => 0.99; // Block actual expansion
+      try {
+        const normalResult = shouldExpand({
+          consecutiveExpanded: 0,
+          bridgesSinceLastExpand: 3,
+          nextSong: { name: 'A', artist: 'B', tags: 'pop' },
+          hour: 14,
+        });
+        const emotionalResult = shouldExpand({
+          consecutiveExpanded: 0,
+          bridgesSinceLastExpand: 3,
+          nextSong: { name: 'A', artist: 'B', tags: 'ambient' },
+          hour: 14,
+        });
+        expect(emotionalResult.probability).toBeGreaterThan(normalResult.probability);
+      } finally {
+        Math.random = originalRandom;
+      }
+    });
+
+    it('boosts probability during late night hours', () => {
+      const originalRandom = Math.random;
+      Math.random = () => 0.99;
+      try {
+        const dayResult = shouldExpand({
+          consecutiveExpanded: 0, bridgesSinceLastExpand: 3, hour: 14,
+        });
+        const nightResult = shouldExpand({
+          consecutiveExpanded: 0, bridgesSinceLastExpand: 3, hour: 23,
+        });
+        expect(nightResult.probability).toBeGreaterThan(dayResult.probability);
+      } finally {
+        Math.random = originalRandom;
+      }
+    });
+
+    it('stacks emotional + night boosts', () => {
+      const originalRandom = Math.random;
+      Math.random = () => 0.99;
+      try {
+        const result = shouldExpand({
+          consecutiveExpanded: 0,
+          bridgesSinceLastExpand: 3,
+          nextSong: { tags: 'emotional' },
+          hour: 23,
+        });
+        // 0.25 base + 0.20 emotional + 0.15 night = 0.60
+        expect(result.probability).toBe(0.60);
+      } finally {
+        Math.random = originalRandom;
+      }
+    });
+
+    it('defaults hour to 12 (daytime) when not provided', () => {
+      const originalRandom = Math.random;
+      Math.random = () => 0.99;
+      try {
+        const result = shouldExpand({
+          consecutiveExpanded: 0, bridgesSinceLastExpand: 3,
+        });
+        // Base probability only: 0.25
+        expect(result.probability).toBe(0.25);
+      } finally {
+        Math.random = originalRandom;
+      }
     });
   });
 

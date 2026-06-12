@@ -149,6 +149,46 @@ class DeepSeekAdapter {
   }
 
   /**
+   * Lightweight text generation — no JSON parsing, no circuit breaker integration.
+   * Used for bridge text, back_announce, and other short-form generation.
+   *
+   * @param {string} systemPrompt - System prompt
+   * @param {string} userPrompt - User message
+   * @param {object} [options] - { temperature, maxTokens }
+   * @returns {Promise<string>} Generated text
+   */
+  async rawChat(systemPrompt, userPrompt, options = {}) {
+    if (this.isCircuitOpen()) {
+      throw new Error('Circuit breaker open');
+    }
+
+    const response = await axios.post(
+      `${DEEPSEEK_BASE_URL}/v1/chat/completions`,
+      {
+        model: this.model,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        temperature: options.temperature ?? 0.8,
+        max_tokens: options.maxTokens ?? 150,
+      },
+      {
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        timeout: options.timeout ?? 15000,
+      }
+    );
+
+    const content = response.data?.choices?.[0]?.message?.content;
+    if (!content) throw new Error('Empty response');
+    this._recordSuccess();
+    return content.trim();
+  }
+
+  /**
    * Parse AI response JSON
    * New format: { say, songs: [{name, artist}], reason, segue }
    */

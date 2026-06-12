@@ -53,6 +53,14 @@ function _fadeMusicUp() {
   if (_duckTimer) clearInterval(_duckTimer);
   const target = _savedVolume;
   const current = audio.volume;
+
+  // Nothing to fade — just restore volume directly
+  if (Math.abs(target - current) < 0.01) {
+    audio.volume = target;
+    _ducking = false;
+    return;
+  }
+
   const steps = Math.max(1, Math.round(FADE_MS / FADE_STEP));
   const delta = (target - current) / steps;
 
@@ -164,6 +172,9 @@ const useAppStore = create((set, get) => ({
       set({ isSpeaking: false });
       // Fade music back up when DJ finishes speaking
       _fadeMusicUp();
+      // Safety: always clear ducking flag after TTS ends
+      _ducking = false;
+      set({ isDucking: false });
     });
     ttsAudio.addEventListener('error', () => {
       set({ isSpeaking: false });
@@ -186,6 +197,12 @@ const useAppStore = create((set, get) => ({
     get().initAudio();
 
     const musicIsPlaying = audio.src && !audio.paused;
+
+    // Cancel any pending fade-up before starting a new duck
+    if (_duckTimer) {
+      clearInterval(_duckTimer);
+      _duckTimer = null;
+    }
 
     // Duck music volume if music is currently playing
     if (musicIsPlaying) {
@@ -297,8 +314,9 @@ const useAppStore = create((set, get) => ({
         ttsAudio.volume = vol;
         ttsAudio.play().catch((err) => {
           console.warn('[TTS] Play failed, fading music up:', err);
+          _ducking = false;
           audio.volume = vol;
-          set({ isSpeaking: false, transitionStyle: 'none' });
+          set({ isSpeaking: false, isDucking: false, transitionStyle: 'none' });
         });
         _ducking = true;
         set({ isSpeaking: true, isDucking: true });
@@ -401,7 +419,14 @@ const useAppStore = create((set, get) => ({
 
   setVolume: (vol) => {
     get().initAudio();
-    // If currently ducked, keep music at ducked level relative to new volume
+    // Auto-recover from stale ducking (TTS ended/failed but flag stuck)
+    if (_ducking && ttsAudio.paused) {
+      if (_duckTimer) clearInterval(_duckTimer);
+      _duckTimer = null;
+      _ducking = false;
+      set({ isDucking: false });
+    }
+    // If currently ducked (and TTS still playing), keep ducked relative to new volume
     if (_ducking) {
       _savedVolume = vol;
       audio.volume = vol * DUCK_LEVEL;

@@ -476,7 +476,8 @@ router.post('/', async (req, res) => {
                     broadcast({ type: 'segment-ready', data: silenceSeg });
                     consecutiveBridges = 0;
                   } else {
-                    const bridgeInfo = segmentEngine.generateBridgeText(prev, next);
+                    const bridgeInfo = await segmentEngine.generateBridgeLLM(prev, next, brain.deepseek);
+                    logger.info('CHAT', `Bridge[${i}] (${bridgeInfo.source}): "${bridgeInfo.text}"`);
                     const bridgeSeg = {
                       id: `seg:bridge:${i}:post`,
                       type: 'bridge',
@@ -486,7 +487,7 @@ router.post('/', async (req, res) => {
                       ttsUrl: null,
                       ttsStatus: 'pending',
                       transitionStyle: bridgeInfo.transitionStyle,
-                      metadata: { prevSong: prev, nextSong: next },
+                      metadata: { prevSong: prev, nextSong: next, bridgeSource: bridgeInfo.source },
                     };
                     await segmentEngine.resolveSegmentTTS(bridgeSeg);
                     state.addSegment(`between_tracks:${i}`, bridgeSeg);

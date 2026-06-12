@@ -135,6 +135,70 @@ function generateBridgeText(prevSong, nextSong, options = {}) {
   return { text, transitionStyle: 'outro' };
 }
 
+// ── LLM Bridge Generation ────────────────────────────────────
+
+/**
+ * Generate a bridge segment between two songs using LLM (DeepSeek rawChat).
+ * Falls back to template-based generateBridgeText() on any failure.
+ *
+ * @param {object} prevSong - { name, artist, tags? }
+ * @param {object} nextSong - { name, artist, tags? }
+ * @param {object} deepseek - DeepSeekAdapter instance (must have rawChat)
+ * @param {object} [options] - { temperature, maxTokens, timeout }
+ * @returns {Promise<{ text: string, transitionStyle: string, source: 'llm'|'template' }>}
+ */
+async function generateBridgeLLM(prevSong, nextSong, deepseek, options = {}) {
+  const fallback = generateBridgeText(prevSong, nextSong);
+
+  // Guard: if deepseek is not provided or rawChat is missing, fall back
+  if (!deepseek || typeof deepseek.rawChat !== 'function') {
+    return { ...fallback, source: 'template' };
+  }
+
+  const systemPrompt = [
+    '你是一个私人音乐电台DJ，风格温暖、自然、不做作。',
+    '你的任务是用一句话串联两首歌之间的过渡，让听众觉得音乐在自然流动。',
+    '',
+    '要求：',
+    '- 只输出一句话（15-60字），不要引号、不要前缀',
+    '- 可以提到歌名、歌手、情绪、风格上的联系',
+    '- 语气像朋友在耳边轻声说话，不要播音腔',
+    '- 不要用"让我们"、"接下来"这类套话开头',
+    '- 禁止使用 emoji',
+  ].join('\n');
+
+  const prevName = prevSong.name || prevSong.trackName || '未知';
+  const prevArtist = prevSong.artist || '未知';
+  const nextName = nextSong.name || nextSong.trackName || '未知';
+  const nextArtist = nextSong.artist || '未知';
+
+  let userPrompt = `上一首：${prevArtist} -《${prevName}》`;
+  if (prevSong.tags) userPrompt += `\n标签：${prevSong.tags}`;
+  userPrompt += `\n下一首：${nextArtist} -《${nextName}》`;
+  if (nextSong.tags) userPrompt += `\n标签：${nextSong.tags}`;
+
+  try {
+    const text = await deepseek.rawChat(systemPrompt, userPrompt, {
+      temperature: options.temperature ?? 0.9,
+      maxTokens: options.maxTokens ?? 100,
+      timeout: options.timeout ?? 12000,
+    });
+
+    // Validate: not empty, not too long (Chinese chars count as ~1)
+    const cleaned = text.replace(/^["'"「『【]+/, '').replace(/["'"」』】]+$/, '').trim();
+    if (!cleaned || cleaned.length < 5 || cleaned.length > 120) {
+      logger.warn('SEGMENT', `LLM bridge too short/long (${cleaned.length} chars), falling back`);
+      return { ...fallback, source: 'template' };
+    }
+
+    // If LLM accidentally included the song names in a template-like way, still accept
+    return { text: cleaned, transitionStyle: 'outro', source: 'llm' };
+  } catch (err) {
+    logger.warn('SEGMENT', `LLM bridge generation failed: ${err.message}, falling back to template`);
+    return { ...fallback, source: 'template' };
+  }
+}
+
 // ── Back Announce Generation ──────────────────────────────────
 
 /**
@@ -428,6 +492,7 @@ function buildSegmentMap(segments) {
 module.exports = {
   normalizeSegments,
   generateBridgeText,
+  generateBridgeLLM,
   generateBackAnnounce,
   shouldSilence,
   resolveSegmentTTS,

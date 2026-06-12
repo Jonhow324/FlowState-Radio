@@ -388,6 +388,7 @@ class Scheduler {
           this._refillBatch++;
           const batchId = this._refillBatch;
           const broadcast = this.broadcast; // Capture for jobQueue closure
+          const deepseek = this.brain.deepseek; // Capture for LLM bridge
           const tracksSnapshot = resolvedTracks.map(t => ({
             trackId: t.trackId,
             trackName: t.trackName || t.name,
@@ -424,7 +425,8 @@ class Scheduler {
                   broadcast({ type: 'segment-ready', data: silenceSeg });
                   consecutiveBridges = 0;
                 } else {
-                  const bridgeInfo = segmentEngine.generateBridgeText(prev, next);
+                  const bridgeInfo = await segmentEngine.generateBridgeLLM(prev, next, deepseek);
+                  logger.info('SCHEDULER', `Bridge[${i}] (${bridgeInfo.source}): "${bridgeInfo.text}"`);
                   const bridgeSeg = {
                     id: `seg:bridge:refill:${payload.batchId}:${i}`,
                     type: 'bridge',
@@ -434,7 +436,7 @@ class Scheduler {
                     ttsUrl: null,
                     ttsStatus: 'pending',
                     transitionStyle: bridgeInfo.transitionStyle,
-                    metadata: { prevSong: prev, nextSong: next },
+                    metadata: { prevSong: prev, nextSong: next, bridgeSource: bridgeInfo.source },
                   };
                   await segmentEngine.resolveSegmentTTS(bridgeSeg);
                   state.addSegment(`between_tracks:refill:${payload.batchId}:${i}`, bridgeSeg);

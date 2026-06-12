@@ -1,6 +1,6 @@
 // segment.test.js — Unit tests for the Segment-driven broadcast engine
 // Tests: normalizeSegments, dedupCheck, dedupFilter, buildSegmentMap,
-//        generateBridgeText, getSegmentsForTrack
+//        generateBridgeText, generateBridgeLLM, getSegmentsForTrack
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
@@ -154,6 +154,53 @@ function generateBridgeText(prevSong, nextSong) {
   ];
   const text = templates[Math.floor(Math.random() * templates.length)];
   return { text, transitionStyle: 'outro' };
+}
+
+async function generateBridgeLLM(prevSong, nextSong, deepseek, options = {}) {
+  const fallback = generateBridgeText(prevSong, nextSong);
+
+  if (!deepseek || typeof deepseek.rawChat !== 'function') {
+    return { ...fallback, source: 'template' };
+  }
+
+  const systemPrompt = [
+    '你是一个私人音乐电台DJ，风格温暖、自然、不做作。',
+    '你的任务是用一句话串联两首歌之间的过渡，让听众觉得音乐在自然流动。',
+    '',
+    '要求：',
+    '- 只输出一句话（15-60字），不要引号、不要前缀',
+    '- 可以提到歌名、歌手、情绪、风格上的联系',
+    '- 语气像朋友在耳边轻声说话，不要播音腔',
+    '- 不要用"让我们"、"接下来"这类套话开头',
+    '- 禁止使用 emoji',
+  ].join('\n');
+
+  const prevName = prevSong.name || prevSong.trackName || '未知';
+  const prevArtist = prevSong.artist || '未知';
+  const nextName = nextSong.name || nextSong.trackName || '未知';
+  const nextArtist = nextSong.artist || '未知';
+
+  let userPrompt = `上一首：${prevArtist} -《${prevName}》`;
+  if (prevSong.tags) userPrompt += `\n标签：${prevSong.tags}`;
+  userPrompt += `\n下一首：${nextArtist} -《${nextName}》`;
+  if (nextSong.tags) userPrompt += `\n标签：${nextSong.tags}`;
+
+  try {
+    const text = await deepseek.rawChat(systemPrompt, userPrompt, {
+      temperature: options.temperature ?? 0.9,
+      maxTokens: options.maxTokens ?? 100,
+      timeout: options.timeout ?? 12000,
+    });
+
+    const cleaned = text.replace(/^["'"「『【]+/, '').replace(/["'"」』】]+$/, '').trim();
+    if (!cleaned || cleaned.length < 5 || cleaned.length > 120) {
+      return { ...fallback, source: 'template' };
+    }
+
+    return { text: cleaned, transitionStyle: 'outro', source: 'llm' };
+  } catch (err) {
+    return { ...fallback, source: 'template' };
+  }
 }
 
 function getSegmentsForTrack(segmentMap, trackIndex) {
@@ -668,6 +715,173 @@ describe('Segment Engine', () => {
                            result.text.includes('NextSong') || result.text.includes('NextArtist');
         expect(hasContent).toBe(true);
       }
+    });
+  });
+
+  // ═══ generateBridgeLLM ═══
+
+  describe('generateBridgeLLM()', () => {
+
+    function createMockDeepseek(response) {
+      return {
+        rawChat: vi.fn().mockResolvedValue(response),
+      };
+    }
+
+    function createFailingDeepseek(error) {
+      return {
+        rawChat: vi.fn().mockRejectedValue(new Error(error)),
+      };
+    }
+
+    it('returns LLM-generated text with source: "llm" on success', async () => {
+      const deepseek = createMockDeepseek('从摇滚到民谣，情绪在慢慢转弯');
+      const result = await generateBridgeLLM(
+        { name: '晴天', artist: '周杰伦' },
+        { name: '红豆', artist: '王菲' },
+        deepseek
+      );
+      expect(result.text).toBe('从摇滚到民谣，情绪在慢慢转弯');
+      expect(result.source).toBe('llm');
+      expect(result.transitionStyle).toBe('outro');
+    });
+
+    it('calls rawChat with correct system and user prompts', async () => {
+      const deepseek = createMockDeepseek('音乐在两种风格间自由穿梭');
+      await generateBridgeLLM(
+        { name: 'SongA', artist: 'ArtistA', tags: 'rock' },
+        { name: 'SongB', artist: 'ArtistB', tags: 'jazz' },
+        deepseek
+      );
+      expect(deepseek.rawChat).toHaveBeenCalledTimes(1);
+      const [systemPrompt, userPrompt] = deepseek.rawChat.mock.calls[0];
+      expect(systemPrompt).toContain('DJ');
+      expect(userPrompt).toContain('SongA');
+      expect(userPrompt).toContain('ArtistA');
+      expect(userPrompt).toContain('SongB');
+      expect(userPrompt).toContain('ArtistB');
+      expect(userPrompt).toContain('rock');
+      expect(userPrompt).toContain('jazz');
+    });
+
+    it('falls back to template when deepseek is null', async () => {
+      const result = await generateBridgeLLM(
+        { name: '晴天', artist: '周杰伦' },
+        { name: '红豆', artist: '王菲' },
+        null
+      );
+      expect(result.text).toBeTruthy();
+      expect(result.source).toBe('template');
+    });
+
+    it('falls back to template when deepseek has no rawChat method', async () => {
+      const result = await generateBridgeLLM(
+        { name: '晴天', artist: '周杰伦' },
+        { name: '红豆', artist: '王菲' },
+        { think: () => {} }  // no rawChat
+      );
+      expect(result.source).toBe('template');
+    });
+
+    it('falls back to template when LLM throws an error', async () => {
+      const deepseek = createFailingDeepseek('API timeout');
+      const result = await generateBridgeLLM(
+        { name: '晴天', artist: '周杰伦' },
+        { name: '红豆', artist: '王菲' },
+        deepseek
+      );
+      expect(result.text).toBeTruthy();
+      expect(result.source).toBe('template');
+    });
+
+    it('falls back to template when LLM returns empty string', async () => {
+      const deepseek = createMockDeepseek('');
+      const result = await generateBridgeLLM(
+        { name: '晴天', artist: '周杰伦' },
+        { name: '红豆', artist: '王菲' },
+        deepseek
+      );
+      expect(result.source).toBe('template');
+    });
+
+    it('falls back to template when LLM returns text too short', async () => {
+      const deepseek = createMockDeepseek('太短');
+      const result = await generateBridgeLLM(
+        { name: '晴天', artist: '周杰伦' },
+        { name: '红豆', artist: '王菲' },
+        deepseek
+      );
+      expect(result.source).toBe('template');
+    });
+
+    it('falls back to template when LLM returns text too long (>120 chars)', async () => {
+      const longText = '这是一段非常非常长的文字，'.repeat(20); // 220 chars
+      const deepseek = createMockDeepseek(longText);
+      const result = await generateBridgeLLM(
+        { name: '晴天', artist: '周杰伦' },
+        { name: '红豆', artist: '王菲' },
+        deepseek
+      );
+      expect(result.source).toBe('template');
+    });
+
+    it('strips leading/trailing quotes from LLM response', async () => {
+      const deepseek = createMockDeepseek('"从摇滚到民谣，情绪在慢慢转弯"');
+      const result = await generateBridgeLLM(
+        { name: '晴天', artist: '周杰伦' },
+        { name: '红豆', artist: '王菲' },
+        deepseek
+      );
+      expect(result.text).toBe('从摇滚到民谣，情绪在慢慢转弯');
+      expect(result.source).toBe('llm');
+    });
+
+    it('strips Chinese quotes from LLM response', async () => {
+      const deepseek = createMockDeepseek('「音乐在两种风格间自由穿梭」');
+      const result = await generateBridgeLLM(
+        { name: '晴天', artist: '周杰伦' },
+        { name: '红豆', artist: '王菲' },
+        deepseek
+      );
+      expect(result.text).toBe('音乐在两种风格间自由穿梭');
+      expect(result.source).toBe('llm');
+    });
+
+    it('handles trackName fallback in song info', async () => {
+      const deepseek = createMockDeepseek('一首好歌接着另一首好歌');
+      await generateBridgeLLM(
+        { trackName: 'TrackA', artist: 'A' },
+        { trackName: 'TrackB', artist: 'B' },
+        deepseek
+      );
+      const userPrompt = deepseek.rawChat.mock.calls[0][1];
+      expect(userPrompt).toContain('TrackA');
+      expect(userPrompt).toContain('TrackB');
+    });
+
+    it('passes options to rawChat', async () => {
+      const deepseek = createMockDeepseek('过渡文案');
+      await generateBridgeLLM(
+        { name: 'A', artist: 'B' },
+        { name: 'C', artist: 'D' },
+        deepseek,
+        { temperature: 0.5, maxTokens: 80, timeout: 5000 }
+      );
+      const opts = deepseek.rawChat.mock.calls[0][2];
+      expect(opts.temperature).toBe(0.5);
+      expect(opts.maxTokens).toBe(80);
+      expect(opts.timeout).toBe(5000);
+    });
+
+    it('omits tags line when song has no tags', async () => {
+      const deepseek = createMockDeepseek('自然过渡一句话');
+      await generateBridgeLLM(
+        { name: 'A', artist: 'B' },
+        { name: 'C', artist: 'D' },
+        deepseek
+      );
+      const userPrompt = deepseek.rawChat.mock.calls[0][1];
+      expect(userPrompt).not.toContain('标签');
     });
   });
 

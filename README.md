@@ -83,16 +83,19 @@ Vite 开发服务器启动后，浏览器打开 `http://localhost:5173`。前端
 cd server
 
 # 预览解析结果（不调用 API）
-node scripts/ingest-playlist.js ../data/my-playlist.csv --dry-run
+node scripts/ingest-playlist.js ../data/playlist/my-playlist.csv --dry-run
 
 # 全量导入（替换模式：清空旧数据后重新导入）
-node scripts/ingest-playlist.js ../data/my-playlist.csv
+node scripts/ingest-playlist.js ../data/playlist/my-playlist.csv
 
 # 追加导入（合并模式：跳过已有歌曲，只导入新歌）
-node scripts/ingest-playlist.js ../data/another-playlist.csv --merge
+node scripts/ingest-playlist.js ../data/playlist/another-playlist.csv --merge
 
 # 导入并同步匹配 NCM trackId
-node scripts/ingest-playlist.js ../data/my-playlist.csv --resolve
+node scripts/ingest-playlist.js ../data/playlist/my-playlist.csv --resolve
+
+# 如果不想分两步走，以后 import 歌单时直接用：
+node scripts/ingest-playlist.js ../data/playlist/my-playlist.csv --resolve --merge
 ```
 
 ### 两种导入模式

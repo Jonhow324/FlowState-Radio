@@ -11,7 +11,56 @@ const vectorStore = require('../services/vectorStore');
 const ncm = require('../services/ncm');
 const logger = require('../utils/logger');
 
-const DELAY_MS = 1500; // Rate limit between NCM calls
+const DELAY_MS = 8000; // Base delay between NCM calls (enhanced API needs more breathing room)
+const MAX_RETRIES = 3;  // Max retries on 405 rate limit
+const COOLDOWN_MS = 60000; // Cooldown after 3 consecutive 405s
+
+/**
+ * Attempt NCM search with exponential-backoff retries on 405 rate limits.
+ * Returns { match, retried } where match may be null if not found.
+ * Throws if all retries are exhausted (non-405 errors or persistent 405).
+ */
+async function searchWithRetry(name, artist, retries = MAX_RETRIES) {
+  const keyword = `${name} ${artist}`.trim();
+
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      let results = await ncm.search(keyword, 3);
+
+      // Fuzzy match
+      let match = null;
+      if (results.length > 0) {
+        const nameNorm = name.toLowerCase().replace(/[\s()（）\[\]【】]/g, '');
+        match = results.find((r) => {
+          const rName = r.trackName.toLowerCase().replace(/[\s()（）\[\]【】]/g, '');
+          return rName.includes(nameNorm) || nameNorm.includes(rName);
+        }) || results[0];
+      }
+
+      // If no match with name+artist, try just name
+      if (!match && attempt === 0) {
+        try {
+          const nameResults = await ncm.search(name, 3);
+          if (nameResults.length > 0) {
+            match = nameResults[0];
+          }
+        } catch (_) { /* fall through */ }
+      }
+
+      return { match, retried: attempt > 0 };
+
+    } catch (err) {
+      if (err.response?.status === 405 && attempt < retries) {
+        // Exponential backoff: 10s, 20s, 40s
+        const wait = 10000 * Math.pow(2, attempt);
+        logger.warn('RESOLVE', `405 rate limit on "${name}", retry ${attempt + 1}/${retries} after ${wait / 1000}s...`);
+        await new Promise((r) => setTimeout(r, wait));
+        continue;
+      }
+      throw err; // Non-405 error or exhausted retries
+    }
+  }
+}
 
 async function main() {
   const overwrite = process.argv.includes('--overwrite');
@@ -31,15 +80,10 @@ async function main() {
     return;
   }
 
-  // Check NCM health
-  if (!ncm.isHealthy()) {
-    logger.error('RESOLVE', 'NCM service is unhealthy. Check NCM_API_URL and NCM_COOKIE in .env');
-    process.exit(1);
-  }
-
   let resolved = 0;
   let failed = 0;
   let skipped = all.length - needsResolve.length;
+  let consecutive405 = 0;
 
   for (let i = 0; i < needsResolve.length; i++) {
     const item = needsResolve[i];
@@ -47,64 +91,40 @@ async function main() {
     const progress = `[${i + 1}/${needsResolve.length}]`;
 
     try {
-      // Try name + artist first
-      const keyword = `${name} ${artist}`.trim();
-      let results = await ncm.search(keyword, 3);
-
-      // Fuzzy match: find result where name or artist partially matches
-      let match = null;
-      if (results.length > 0) {
-        const nameNorm = name.toLowerCase().replace(/[\s()（）\[\]【】]/g, '');
-        match = results.find((r) => {
-          const rName = r.trackName.toLowerCase().replace(/[\s()（）\[\]【】]/g, '');
-          return rName.includes(nameNorm) || nameNorm.includes(rName);
-        }) || results[0]; // fallback to first result
-      }
-
-      if (!match) {
-        // Retry with just song name
-        results = await ncm.search(name, 3);
-        if (results.length > 0) {
-          match = results[0];
-        }
-      }
+      const { match, retried } = await searchWithRetry(name, artist);
 
       if (match) {
         item.metadata.ncmTrackId = match.trackId;
         item.metadata.ncmAlbumArt = match.albumArt || null;
         resolved++;
-        logger.info('RESOLVE', `${progress} ✓ ${name} → NCM ${match.trackId} (${match.trackName})`);
+        consecutive405 = 0; // Reset on success
+        logger.info('RESOLVE', `${progress} ✓ ${name} → NCM ${match.trackId} (${match.trackName})${retried ? ' [retried]' : ''}`);
       } else {
         failed++;
         logger.warn('RESOLVE', `${progress} ✗ ${name} — not found on NCM`);
       }
     } catch (err) {
-      // On 405 rate limit, wait and retry once
-      if (err.response && err.response.status === 405) {
-        await new Promise((r) => setTimeout(r, 5000));
-        try {
-          const retryResults = await ncm.search(`${name} ${artist}`.trim(), 3);
-          if (retryResults.length > 0) {
-            item.metadata.ncmTrackId = retryResults[0].trackId;
-            item.metadata.ncmAlbumArt = retryResults[0].albumArt || null;
-            resolved++;
-            logger.info('RESOLVE', `${progress} ✓ ${name} → NCM ${retryResults[0].trackId} (retry)`);
-            // Skip the failed++ below
-            if (i < needsResolve.length - 1) {
-              await new Promise((r) => setTimeout(r, DELAY_MS));
-            }
-            continue;
-          }
-        } catch (_) {}
-      }
       failed++;
+      consecutive405++;
       logger.warn('RESOLVE', `${progress} ✗ ${name} — error: ${err.message}`);
+
+      // Escalating cooldown on consecutive 405s
+      if (consecutive405 >= 3) {
+        logger.warn('RESOLVE', `${consecutive405} consecutive 405s — cooling down ${COOLDOWN_MS / 1000}s...`);
+        await new Promise((r) => setTimeout(r, COOLDOWN_MS));
+        consecutive405 = 0;
+      }
     }
 
-    // Rate limit — longer pause after 405 errors
+    // Save progress every 10 songs (so we don't lose work on crash)
+    if ((i + 1) % 10 === 0) {
+      vectorStore.save();
+      logger.info('RESOLVE', `Progress saved: ${i + 1}/${needsResolve.length} (✓${resolved} ✗${failed})`);
+    }
+
+    // Inter-request delay
     if (i < needsResolve.length - 1) {
-      const pause = (failed > 0 && failed % 3 === 0) ? DELAY_MS * 3 : DELAY_MS;
-      await new Promise((r) => setTimeout(r, pause));
+      await new Promise((r) => setTimeout(r, DELAY_MS));
     }
   }
 

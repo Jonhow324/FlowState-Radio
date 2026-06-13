@@ -1,8 +1,15 @@
 // scripts/ingest-playlist.js — Playlist CSV/TSV ingestion into vector database
-// Usage: node scripts/ingest-playlist.js <path-to-csv-or-tsv>
+// Usage: node scripts/ingest-playlist.js <path-to-csv-or-tsv> [options]
 //
 // Supports both comma-separated (CSV) and tab-separated (TSV) formats.
 // Auto-detects delimiter and whether a header row is present.
+//
+// Key options:
+//   --merge             Append to existing DB (skip songs with same hash ID)
+//   --check-duplicates  Scan for hash collisions (CSV self-dupes & DB overlap)
+//   --dry-run           Parse only, no API calls
+//   --resolve           Also resolve NCM track IDs
+//
 // If no header row is found, columns are mapped positionally:
 //   序号 | 歌名 | 歌手 | 风格标签 | 核心歌词大意/情感基调 | 个人评分/听歌频率
 
@@ -209,16 +216,18 @@ async function main() {
     console.log('  序号 | 歌名 | 歌手 | 风格标签 | 核心歌词大意/情感基调 | 个人评分/听歌频率');
     console.log('');
     console.log('Options:');
-    console.log('  --dry-run      Parse and show results without calling embedding API');
-    console.log('  --resolve      Also resolve NCM track IDs for each song (slower)');
-    console.log('  --merge        Append to existing DB, skip songs already present (by content hash)');
-    console.log('                 Without --merge, the DB is cleared before import (replace mode)');
+    console.log('  --dry-run           Parse and show results without calling embedding API');
+    console.log('  --resolve           Also resolve NCM track IDs for each song (slower)');
+    console.log('  --merge             Append to existing DB, skip songs already present (by content hash)');
+    console.log('                      Without --merge, the DB is cleared before import (replace mode)');
+    console.log('  --check-duplicates  Check for hash collisions (CSV self-dupes + DB overlap) and exit');
     process.exit(1);
   }
 
   const dryRun = process.argv.includes('--dry-run');
   const resolve = process.argv.includes('--resolve');
   const merge = process.argv.includes('--merge');
+  const checkDupes = process.argv.includes('--check-duplicates');
   const resolvedPath = path.resolve(filePath);
 
   if (!fs.existsSync(resolvedPath)) {
@@ -259,6 +268,68 @@ async function main() {
 
   // Assign content-hash IDs to all parsed songs
   const allSongs = songs.map(song => ({ ...song, hashId: generateSongId(song) }));
+
+  // ── Duplicate detection ──────────────────────────────────
+  if (checkDupes) {
+    // 1. Check self-duplicates within the CSV
+    const seenInCsv = new Map(); // hashId → first occurrence info
+    const selfDupes = [];
+
+    for (const song of allSongs) {
+      if (seenInCsv.has(song.hashId)) {
+        const first = seenInCsv.get(song.hashId);
+        selfDupes.push({
+          hashId: song.hashId,
+          first: { name: first.name, artist: first.artist },
+          later: { name: song.name, artist: song.artist },
+        });
+      } else {
+        seenInCsv.set(song.hashId, { name: song.name, artist: song.artist });
+      }
+    }
+
+    // 2. Check collisions with existing DB
+    vectorStore.load();
+    const existingIds = new Set(vectorStore.listMetadata().map(item => item.id));
+    const dbCollisions = allSongs.filter(song => existingIds.has(song.hashId));
+
+    // 3. Print report
+    console.log('\n═══════════════════════════════════════════');
+    console.log('  DUPLICATE DETECTION REPORT');
+    console.log('═══════════════════════════════════════════');
+    console.log(`  CSV total: ${allSongs.length} songs`);
+    console.log(`  DB existing: ${vectorStore.size()} items`);
+    console.log('───────────────────────────────────────────');
+
+    if (selfDupes.length === 0 && dbCollisions.length === 0) {
+      console.log('  ✓ No duplicates found. All clear!\n');
+    } else {
+      if (selfDupes.length > 0) {
+        console.log(`\n  [CSV Self-Duplicates] ${selfDupes.length} hash collisions within the CSV:\n`);
+        selfDupes.forEach((dup, i) => {
+          console.log(`  ${i + 1}. ID=${dup.hashId}`);
+          console.log(`     ① "${dup.first.name}" — ${dup.first.artist}`);
+          console.log(`     ② "${dup.later.name}" — ${dup.later.artist}  ← will overwrite ①\n`);
+        });
+        console.log(`  → Impact: -${selfDupes.length} songs lost on upsert`);
+      }
+
+      if (dbCollisions.length > 0) {
+        console.log(`\n  [DB Collisions] ${dbCollisions.length} songs already in vector-db.json:\n`);
+        dbCollisions.forEach((song, i) => {
+          console.log(`  ${i + 1}. ID=${song.hashId}: "${song.name}" — ${song.artist}`);
+        });
+        console.log(`\n  → Impact: -${dbCollisions.length} skipped in merge mode`);
+      }
+
+      const totalLoss = selfDupes.length + dbCollisions.length;
+      console.log(`\n  Total unique songs after merge: ${allSongs.length - totalLoss}`);
+      console.log(`  Expected DB size after merge: ${vectorStore.size() + allSongs.length - totalLoss - dbCollisions.length}\n`);
+    }
+
+    console.log('  (Use --merge to proceed with ingestion)\n');
+    process.exit(0);
+  }
 
   let songsToProcess;
 

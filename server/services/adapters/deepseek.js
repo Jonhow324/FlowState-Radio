@@ -213,6 +213,7 @@ class DeepSeekAdapter {
       play: songs, // Keep for compatibility — chat.js will resolve
       reason: parsed.reason || '',
       segue: parsed.segue || null,
+      segments: Array.isArray(parsed.segments) ? parsed.segments : null,
     };
   }
 }

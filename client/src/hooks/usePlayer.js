@@ -7,7 +7,7 @@ function usePlayer() {
   const [progress, setProgress] = useState(0);
   const [duration, setDuration] = useState(0);
 
-  // Poll current state from server
+  // One-time fetch on mount; subsequent updates come via WebSocket
   const fetchState = useCallback(async () => {
     try {
       const [nowRes, queueRes] = await Promise.all([
@@ -29,8 +29,6 @@ function usePlayer() {
 
   useEffect(() => {
     fetchState();
-    const interval = setInterval(fetchState, 5000);
-    return () => clearInterval(interval);
   }, [fetchState]);
 
   return {

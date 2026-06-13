@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import useAppStore from '../stores/appStore.js';
 
@@ -13,14 +13,10 @@ const listItem = {
 };
 
 function TrackQueue() {
-  const { queue, refreshQueue } = useAppStore();
+  const queue = useAppStore((s) => s.queue);
   const [expanded, setExpanded] = useState(true);
 
-  useEffect(() => {
-    refreshQueue();
-    const interval = setInterval(refreshQueue, 5000);
-    return () => clearInterval(interval);
-  }, []);
+  // Queue is driven by WebSocket: initial load via radio-started, updates via queue-update
 
   if (!queue || queue.length === 0) {
     return (

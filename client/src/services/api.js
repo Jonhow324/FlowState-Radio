@@ -2,7 +2,7 @@ import axios from 'axios';
 
 const api = axios.create({
   baseURL: '',
-  timeout: 10000,
+  timeout: 60000,  // 60s — brain + NCM resolution can be slow
   headers: {
     'Content-Type': 'application/json',
   },

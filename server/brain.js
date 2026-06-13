@@ -173,6 +173,42 @@ class Brain {
   // ── Prompt Builders ─────────────────────────────────────────
 
   /**
+   * Build the rhythm guide section for prompts.
+   * Teaches the LLM to make rhythm decisions based on persona + time + song flow.
+   */
+  _buildRhythmGuide() {
+    return [
+      '## 节奏控制（非常重要）',
+      '你是电台主持人，不是每两首歌之间都要说话。请根据以下原则决定节奏：',
+      '',
+      '### 时段节奏规则',
+      '- 早晨 7-9: 轻快简洁，每 2-3 首歌之间说一次，简短就好',
+      '- 上午 9-12: 用户在工作，少说话多放歌，大部分间隙留白，偶尔一句过渡',
+      '- 午间 12-14: 轻松随意，可以说可以不说，看歌曲搭配',
+      '- 下午 14-18: 适中节奏，每 1-2 首歌之间说一次',
+      '- 晚上 18-22: 最自由的时段，可以展开聊，歌曲间过渡自然',
+      '- 深夜 22-6: 安静私密，大量留白，只在特别有话想说时才开口',
+      '',
+      '### 歌曲流节奏',
+      '- 同一歌手/风格连续播放时，留白让音乐自己说话',
+      '- 情绪型歌曲（ambient/post-rock/纯音乐）前后适合留白',
+      '- 风格跳跃大的歌曲之间适合用 bridge 过渡',
+      '- 如果连续 3 首都没说话，可以插一句简短的',
+      '',
+      '### segments 中的 rhythm 字段',
+      '在 segments 数组中为每个歌曲间隙指定节奏决策：',
+      '  - type: "bridge" + depth: "shallow"（一句话过渡）或 "deep"（展开聊 2-4 句）',
+      '  - type: "silence"（刻意留白，不说话）',
+      '  - type: "cold_open"（第一首歌前的开场白，anchor=0）',
+      '  - type: "back_announce"（一首歌播完后的简短回味）',
+      '',
+      '你不需要为每个间隙都指定 segment——没有指定的间隙会由系统用默认规则处理。',
+      '但你应该为主要间隙（尤其是开头、中间重要过渡、结尾）做节奏决策。',
+      '目标：推荐 10 首歌时，大约定义 4-8 个 segments，其余留空。',
+    ].join('\n');
+  }
+
+  /**
    * Build RAG prompt: LLM selects from pre-retrieved candidates
    */
   _buildRAGPrompt(context, candidates) {
@@ -203,13 +239,14 @@ class Brain {
       '',
       '# 输出要求',
       '严格返回 JSON 格式：',
-      '{"say": "DJ开场串词(自然语言，可为null)", "songs": [{"name": "歌曲名", "artist": "歌手", "transition_style": "intro|outro|none"}], "segments": [{"type": "cold_open|bridge", "text": "话术文本", "anchor": 0, "position": "before_track|between_tracks"}], "reason": "选歌理由"}',
+      '{"say": "DJ开场串词(自然语言，可为null)", "songs": [{"name": "歌曲名", "artist": "歌手", "transition_style": "intro|outro|none"}], "segments": [{"type": "cold_open|bridge|silence|back_announce", "text": "话术文本(silence时为空)", "anchor": 0, "position": "before_track|between_tracks|after_track", "depth": "shallow|deep"}], "reason": "选歌理由"}',
       '',
-      'segments 说明（可选但推荐）：',
-      '  - type: "cold_open"(第一首歌前的开场白) 或 "bridge"(歌曲间的串场)',
-      '  - position: "before_track"(歌曲前) 或 "between_tracks"(两首歌之间)',
-      '  - anchor: 锚定歌曲的索引号（从0开始）。cold_open 的 anchor 为 0，bridge 的 anchor 为前一首歌的索引',
-      '  - text: DJ 话术文本，要自然、简短（1-2句话）',
+      'segments 说明（推荐提供，控制电台节奏）：',
+      '  - type: "cold_open"(开场白) | "bridge"(串场) | "silence"(留白) | "back_announce"(歌曲回味)',
+      '  - position: "before_track" | "between_tracks" | "after_track"',
+      '  - anchor: 锚定歌曲的索引号（从0开始）',
+      '  - depth: "shallow"(一句话) 或 "deep"(展开聊)——仅 bridge 类型有效',
+      '  - text: DJ 话术文本（silence 类型时留空字符串 ""）',
       '  如果不提供 segments，系统会自动生成串场。',
       '',
       'transition_style 说明：',
@@ -219,9 +256,11 @@ class Brain {
       '第一首歌建议用 "intro"，歌曲之间用 "outro" 衔接。',
       '',
       '从上面的候选歌曲列表中精选 10-20 首最适合当前场景的歌曲。',
-      'songs 数组中的 name 和 artist 必须与候选列表中的完全一致，不要编造新歌。',
+      'songs 数组内的 name 和 artist 必须与候选列表中的完全一致，不要编造新歌。',
       '根据当前时间、天气、用户心情和最近播放记录来决定最佳选择。',
       'say 字段为每首歌的电台串词，要自然融入当前环境信息。',
+      '',
+      this._buildRhythmGuide(),
     ].join('\n');
   }
 
@@ -243,12 +282,14 @@ class Brain {
       '',
       '# 输出要求',
       '严格返回 JSON 格式：',
-      '{"say": "DJ开场串词(自然语言，可为null)", "songs": [{"name": "歌曲名", "artist": "歌手", "transition_style": "intro|outro|none"}], "segments": [{"type": "cold_open|bridge", "text": "话术文本", "anchor": 0, "position": "before_track|between_tracks"}], "reason": "选歌理由"}',
-      'segments 为可选字段。type: "cold_open"(开场白, anchor=0) 或 "bridge"(串场, anchor=前一首索引)。不提供则系统自动生成。',
+      '{"say": "DJ开场串词(自然语言，可为null)", "songs": [{"name": "歌曲名", "artist": "歌手", "transition_style": "intro|outro|none"}], "segments": [{"type": "cold_open|bridge|silence|back_announce", "text": "话术文本(silence时为空)", "anchor": 0, "position": "before_track|between_tracks|after_track", "depth": "shallow|deep"}], "reason": "选歌理由"}',
+      'segments 为节奏控制字段。type: "cold_open"(开场白) | "bridge"(串场,depth=shallow|deep) | "silence"(留白) | "back_announce"(回味)。不提供则系统自动生成。',
       'transition_style: "intro"(新歌前奏垫底说话) 或 "outro"(旧歌尾奏渐弱后切入) 或 "none"(直接切换)。',
       'songs 数组中填入歌曲名称和歌手名，推荐 10-20 首。必须是真实存在的歌曲。',
       '根据用户的品味、当前环境、时间和记忆来选择最合适的音乐。',
       '注意：不要编造歌曲，请推荐你确认真实存在的歌曲。',
+      '',
+      this._buildRhythmGuide(),
     ].join('\n');
   }
 

@@ -15,6 +15,7 @@ const scheduler = require('../scheduler');
 const filler = require('../services/filler');
 const segmentEngine = require('../services/segmentEngine');
 const jobQueue = require('../services/jobQueue');
+const personaLoader = require('../services/personaLoader');
 
 // Singleton brain instance
 const brain = new Brain(config);
@@ -455,6 +456,9 @@ router.post('/', async (req, res) => {
                 let consecutiveExpanded = 0;
                 let bridgesSinceLastExpand = 0;
 
+                // Build enriched bridge context once for this batch
+                const bridgeContext = personaLoader.buildBridgeContext();
+
                 for (let i = 0; i < payload.tracks.length - 1; i++) {
                   const prev = {
                     name: payload.tracks[i].trackName,
@@ -481,6 +485,7 @@ router.post('/', async (req, res) => {
                   } else {
                     const bridgeInfo = await segmentEngine.generateBridgeLLM(prev, next, brain.deepseek, {
                       expandContext: { nextSong: next, consecutiveExpanded, bridgesSinceLastExpand },
+                      bridgeContext,
                     });
                     logger.info('CHAT', `Bridge[${i}] (${bridgeInfo.source}/${bridgeInfo.depth}): "${bridgeInfo.text.slice(0, 50)}..."`);
                     const bridgeSeg = {

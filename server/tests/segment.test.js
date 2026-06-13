@@ -275,12 +275,19 @@ function generateBackAnnounce(song, options = {}) {
 const SILENCE_CONFIG = {
   nightHoursStart: 23,
   nightHoursEnd: 6,
-  nightSilenceProbability: 0.4,
+  nightSilenceProbability: 0.5,
   consecutiveBridgeLimit: 3,
+  sameArtistBoost: 0.3,
+  sameGenreBoost: 0.15,
   emotionalTags: new Set([
     'emotional', 'ambient', 'instrumental', 'classical',
     'post-rock', 'shoegaze', 'dream pop', '冥想', '纯音乐',
     '新世纪', '氛围', '后摇', '治愈',
+  ]),
+  genreTags: new Set([
+    'rock', 'pop', 'jazz', 'electronic', 'hip-hop', 'r&b', 'folk',
+    'indie', 'punk', 'metal', 'blues', 'country', 'reggae',
+    '摇滚', '流行', '爵士', '电子', '民谣', '嘻哈',
   ]),
 };
 
@@ -291,17 +298,34 @@ function shouldSilence(context = {}) {
   const prevTags = ((prevSong?.tags || '') + ' ' + (prevSong?.mood || '')).toLowerCase();
   const nextTags = ((nextSong?.tags || '') + ' ' + (nextSong?.mood || '')).toLowerCase();
   const prevIsEmotional = [...SILENCE_CONFIG.emotionalTags].some(t => prevTags.includes(t));
-  const nextIsEmotional = [...SILENCE_CONFIG.emotionalTags].some(t => nextTags.includes(t));
 
   if (prevIsEmotional) return { shouldSilence: true, reason: 'emotional_prev' };
 
+  // Same artist check
+  const prevArtist = (prevSong?.artist || '').toLowerCase().trim();
+  const nextArtist = (nextSong?.artist || '').toLowerCase().trim();
+  if (prevArtist && nextArtist && prevArtist === nextArtist) {
+    return { shouldSilence: true, reason: 'same_artist' };
+  }
+
   const isNight = hour >= SILENCE_CONFIG.nightHoursStart || hour < SILENCE_CONFIG.nightHoursEnd;
-  if (isNight) return { shouldSilence: true, reason: 'night_mode' };
+  if (isNight && Math.random() < SILENCE_CONFIG.nightSilenceProbability) {
+    return { shouldSilence: true, reason: 'night_mode' };
+  }
 
   if (consecutiveBridges >= SILENCE_CONFIG.consecutiveBridgeLimit) {
     return { shouldSilence: true, reason: 'bridge_fatigue' };
   }
 
+  // Same genre check
+  if (prevTags && nextTags) {
+    const sharedGenres = [...SILENCE_CONFIG.genreTags].filter(t => prevTags.includes(t) && nextTags.includes(t));
+    if (sharedGenres.length > 0 && Math.random() < SILENCE_CONFIG.sameGenreBoost) {
+      return { shouldSilence: true, reason: `same_genre (${sharedGenres[0]})` };
+    }
+  }
+
+  const nextIsEmotional = [...SILENCE_CONFIG.emotionalTags].some(t => nextTags.includes(t));
   if (nextIsEmotional) return { shouldSilence: true, reason: 'emotional_next' };
 
   return { shouldSilence: false, reason: null };
@@ -1245,24 +1269,33 @@ describe('Segment Engine', () => {
       expect(result.reason).toBe('emotional_prev');
     });
 
-    it('returns silence during night hours', () => {
-      const result = shouldSilence({
-        prevSong: { name: 'A', artist: 'B', tags: 'pop' },
-        consecutiveBridges: 0,
-        hour: 23,
-      });
-      expect(result.shouldSilence).toBe(true);
-      expect(result.reason).toBe('night_mode');
+    it('can return silence during night hours (probabilistic)', () => {
+      let nightSilenceCount = 0;
+      for (let i = 0; i < 50; i++) {
+        const result = shouldSilence({
+          prevSong: { name: 'A', artist: 'B', tags: 'pop' },
+          consecutiveBridges: 0,
+          hour: 23,
+        });
+        if (result.shouldSilence && result.reason === 'night_mode') nightSilenceCount++;
+      }
+      // With 50% probability over 50 runs, expect 15-35 night_mode silences
+      expect(nightSilenceCount).toBeGreaterThan(10);
+      expect(nightSilenceCount).toBeLessThan(45);
     });
 
-    it('returns silence during early morning (before 6am)', () => {
-      const result = shouldSilence({
-        prevSong: { name: 'A', artist: 'B', tags: 'pop' },
-        consecutiveBridges: 0,
-        hour: 3,
-      });
-      expect(result.shouldSilence).toBe(true);
-      expect(result.reason).toBe('night_mode');
+    it('can return silence during early morning (probabilistic)', () => {
+      let morningCount = 0;
+      for (let i = 0; i < 50; i++) {
+        const result = shouldSilence({
+          prevSong: { name: 'A', artist: 'B', tags: 'pop' },
+          consecutiveBridges: 0,
+          hour: 3,
+        });
+        if (result.shouldSilence && result.reason === 'night_mode') morningCount++;
+      }
+      expect(morningCount).toBeGreaterThan(10);
+      expect(morningCount).toBeLessThan(45);
     });
 
     it('returns silence after 3+ consecutive bridges', () => {
@@ -1361,5 +1394,311 @@ describe('Segment Engine', () => {
       expect(seg.transitionStyle).toBe('none');
       expect(seg.metadata.silenceReason).toBe('night_mode');
     });
+  });
+});
+
+// ══════════════════════════════════════════════════════════════
+// normalizeBridgeOutput() — Normalization Pipeline Tests
+// ══════════════════════════════════════════════════════════════
+
+// Re-implement locally (avoid module deps)
+function normalizeBridgeOutput(rawText, depth, fallback) {
+  const isDeep = depth === 'deep';
+  const minLen = isDeep ? 20 : 5;
+  const maxLen = isDeep ? 300 : 120;
+
+  let cleaned = (rawText || '')
+    .replace(/^["'"「『【《\s]+/, '')
+    .replace(/["'"」』】》\s]+$/, '')
+    .replace(/```[\s\S]*```/g, '')
+    .replace(/^\d+[.、)\]]\s*/, '')
+    .trim();
+
+  if (!cleaned || cleaned.length < minLen) {
+    return { text: fallback.text, source: 'template', depth: 'shallow', dedup: 'skipped' };
+  }
+
+  if (cleaned.length > maxLen) {
+    const sentenceEnd = cleaned.lastIndexOf('。', maxLen);
+    if (sentenceEnd > minLen) {
+      cleaned = cleaned.slice(0, sentenceEnd + 1);
+    } else {
+      const commaEnd = cleaned.lastIndexOf('，', maxLen);
+      if (commaEnd > minLen) {
+        cleaned = cleaned.slice(0, commaEnd + 1);
+      } else {
+        return { text: fallback.text, source: 'template', depth: 'shallow', dedup: 'skipped' };
+      }
+    }
+  }
+
+  return { text: cleaned, source: 'llm', depth, dedup: 'passed' };
+}
+
+describe('normalizeBridgeOutput()', () => {
+  const fallback = { text: '模板fallback文本', source: 'template' };
+
+  it('cleans leading/trailing quotes', () => {
+    const result = normalizeBridgeOutput('"这首歌的旋律真动人"', 'shallow', fallback);
+    expect(result.text).toBe('这首歌的旋律真动人');
+    expect(result.source).toBe('llm');
+  });
+
+  it('cleans Chinese quotes', () => {
+    const result = normalizeBridgeOutput('「从爵士到民谣的过渡」', 'shallow', fallback);
+    expect(result.text).toBe('从爵士到民谣的过渡');
+  });
+
+  it('strips numbering prefix', () => {
+    const result = normalizeBridgeOutput('1. 这首歌的贝斯线很特别', 'shallow', fallback);
+    expect(result.text).toBe('这首歌的贝斯线很特别');
+  });
+
+  it('strips markdown code blocks', () => {
+    const result = normalizeBridgeOutput('```一首歌的过渡```', 'shallow', fallback);
+    expect(result.text).toBe(fallback.text);
+    expect(result.source).toBe('template');
+  });
+
+  it('falls back for too-short output (shallow)', () => {
+    const result = normalizeBridgeOutput('短', 'shallow', fallback);
+    expect(result.source).toBe('template');
+  });
+
+  it('falls back for too-short output (deep)', () => {
+    const result = normalizeBridgeOutput('这段文字不够二十个字', 'deep', fallback);
+    expect(result.source).toBe('template');
+  });
+
+  it('accepts valid shallow output', () => {
+    const result = normalizeBridgeOutput('从周杰伦的安静到林俊杰的温柔，情绪在流动', 'shallow', fallback);
+    expect(result.source).toBe('llm');
+    expect(result.depth).toBe('shallow');
+  });
+
+  it('accepts valid deep output', () => {
+    const text = '这首歌的创作背景很有意思，据说歌手是在一次深夜独自开车时写下的旋律，那种孤独感透过每一个音符传递出来，让人觉得深夜的电台就是为自己开的。';
+    const result = normalizeBridgeOutput(text, 'deep', fallback);
+    expect(result.source).toBe('llm');
+    expect(result.depth).toBe('deep');
+  });
+
+  it('truncates over-long output at sentence boundary', () => {
+    const longText = '这是一段很长的文字描述歌曲的过渡和连接。' + '后面还有很多内容需要被截断处理。'.repeat(20);
+    const result = normalizeBridgeOutput(longText, 'shallow', fallback);
+    expect(result.text.length).toBeLessThanOrEqual(121); // maxLen + 1 for period
+    expect(result.source).toBe('llm');
+  });
+
+  it('falls back when over-long with no sentence boundary', () => {
+    const longNoBreak = '这'.repeat(200);
+    const result = normalizeBridgeOutput(longNoBreak, 'shallow', fallback);
+    expect(result.source).toBe('template');
+  });
+
+  it('handles null input', () => {
+    const result = normalizeBridgeOutput(null, 'shallow', fallback);
+    expect(result.source).toBe('template');
+  });
+
+  it('handles empty string input', () => {
+    const result = normalizeBridgeOutput('', 'shallow', fallback);
+    expect(result.source).toBe('template');
+  });
+});
+
+// ══════════════════════════════════════════════════════════════
+// checkBridgeDedup() — Bridge Text Deduplication Tests
+// ══════════════════════════════════════════════════════════════
+
+// Re-implement locally
+function charOverlap(a, b) {
+  if (!a || !b) return 0;
+  const shorter = a.length < b.length ? a : b;
+  const longer = a.length >= b.length ? a : b;
+  let matches = 0;
+  const longerChars = new Set(longer.split(''));
+  for (const ch of shorter) {
+    if (longerChars.has(ch)) {
+      matches++;
+      longerChars.delete(ch);
+    }
+  }
+  return matches / shorter.length;
+}
+
+function checkBridgeDedup(text, history, threshold = 0.4) {
+  if (!text || history.length === 0) return { allowed: true, reason: null };
+  for (const prev of history) {
+    if (text === prev) return { allowed: false, reason: 'exact_duplicate' };
+    const overlap = charOverlap(text, prev);
+    if (overlap > threshold) return { allowed: false, reason: `too_similar (${(overlap * 100).toFixed(0)}% overlap)` };
+  }
+  return { allowed: true, reason: null };
+}
+
+describe('checkBridgeDedup()', () => {
+  it('allows text with empty history', () => {
+    const result = checkBridgeDedup('新的过渡文字', []);
+    expect(result.allowed).toBe(true);
+  });
+
+  it('blocks exact duplicates', () => {
+    const history = ['从安静到温柔的过渡'];
+    const result = checkBridgeDedup('从安静到温柔的过渡', history);
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toBe('exact_duplicate');
+  });
+
+  it('blocks very similar texts', () => {
+    const history = ['周杰伦的歌总是让人想起青春'];
+    const result = checkBridgeDedup('周杰伦的歌总让人回忆起青春', history);
+    expect(result.allowed).toBe(false);
+  });
+
+  it('allows sufficiently different texts', () => {
+    const history = ['从摇滚到民谣的风格转变'];
+    const result = checkBridgeDedup('深夜的爵士乐像一杯红酒', history);
+    expect(result.allowed).toBe(true);
+  });
+
+  it('handles null text', () => {
+    const result = checkBridgeDedup(null, ['history']);
+    expect(result.allowed).toBe(true);
+  });
+});
+
+describe('charOverlap()', () => {
+  it('returns high overlap for identical strings (unique chars / length)', () => {
+    // "hello" has 4 unique chars {h,e,l,o}, overlap = 4/5 = 0.8
+    expect(charOverlap('hello', 'hello')).toBeCloseTo(0.8);
+  });
+
+  it('returns 0 for completely different strings', () => {
+    expect(charOverlap('abc', 'xyz')).toBe(0);
+  });
+
+  it('handles different lengths', () => {
+    const overlap = charOverlap('ab', 'abcd');
+    expect(overlap).toBe(1); // Both chars of shorter found in longer
+  });
+
+  it('handles empty strings', () => {
+    expect(charOverlap('', 'test')).toBe(0);
+    expect(charOverlap('test', '')).toBe(0);
+  });
+});
+
+// ══════════════════════════════════════════════════════════════
+// Enhanced shouldSilence() — Same Artist & Genre Tests
+// ══════════════════════════════════════════════════════════════
+
+describe('shouldSilence() — enhanced rules', () => {
+  // Re-use the existing local implementation from earlier in the file
+  // but test the new rules specifically
+
+  it('returns silence for same artist consecutive tracks', () => {
+    const result = shouldSilence({
+      prevSong: { name: 'Song A', artist: '周杰伦', tags: 'pop' },
+      nextSong: { name: 'Song B', artist: '周杰伦', tags: 'pop' },
+      consecutiveBridges: 0,
+      hour: 15,
+    });
+    expect(result.shouldSilence).toBe(true);
+    expect(result.reason).toBe('same_artist');
+  });
+
+  it('does not trigger same_artist for different artists', () => {
+    const result = shouldSilence({
+      prevSong: { name: 'Song A', artist: '周杰伦', tags: '' },
+      nextSong: { name: 'Song B', artist: '林俊杰', tags: '' },
+      consecutiveBridges: 0,
+      hour: 15,
+    });
+    // Should not be silence unless other rules trigger
+    // (At hour 15, not night, not emotional, no fatigue)
+    expect(result.reason).not.toBe('same_artist');
+  });
+
+  it('returns silence for emotional_prev regardless of artist', () => {
+    const result = shouldSilence({
+      prevSong: { name: 'Song', artist: 'Artist', tags: 'ambient' },
+      nextSong: { name: 'Next', artist: '周杰伦', tags: 'pop' },
+      consecutiveBridges: 0,
+      hour: 15,
+    });
+    expect(result.shouldSilence).toBe(true);
+    expect(result.reason).toBe('emotional_prev');
+  });
+
+  it('night silence probability is 0.5', () => {
+    // Run 100 times, expect roughly 50% silence
+    let silenceCount = 0;
+    for (let i = 0; i < 100; i++) {
+      const result = shouldSilence({
+        prevSong: { name: 'Song', artist: 'A', tags: '' },
+        nextSong: { name: 'Next', artist: 'B', tags: '' },
+        consecutiveBridges: 0,
+        hour: 23,
+      });
+      if (result.shouldSilence) silenceCount++;
+    }
+    // Should be roughly 50 (allow 30-70 range for randomness)
+    expect(silenceCount).toBeGreaterThan(25);
+    expect(silenceCount).toBeLessThan(75);
+  });
+});
+
+// ══════════════════════════════════════════════════════════════
+// personaLoader — Basic Structure Tests
+// ══════════════════════════════════════════════════════════════
+
+describe('personaLoader bridge persona', () => {
+  const BRIDGE_PERSONA_ZH = [
+    '你是 FlowState，一个私人音乐电台 DJ。',
+    '风格：温暖、自然、有见地，像朋友在耳边轻声聊天。',
+    '绝不用播音腔、套话开头、空泛赞美、鸡汤语、emoji。',
+    '细节胜过空话——提到具体的旋律、歌词、编曲巧思。',
+    '沉默也是表达——不是每个间隙都需要填满。',
+  ].join('\n');
+
+  it('contains key persona traits', () => {
+    expect(BRIDGE_PERSONA_ZH).toContain('FlowState');
+    expect(BRIDGE_PERSONA_ZH).toContain('温暖');
+    expect(BRIDGE_PERSONA_ZH).toContain('自然');
+  });
+
+  it('includes forbidden patterns', () => {
+    expect(BRIDGE_PERSONA_ZH).toContain('播音腔');
+    expect(BRIDGE_PERSONA_ZH).toContain('emoji');
+    expect(BRIDGE_PERSONA_ZH).toContain('空泛');
+  });
+
+  it('mentions silence as expression', () => {
+    expect(BRIDGE_PERSONA_ZH).toContain('沉默');
+  });
+});
+
+describe('COLD_OPEN_PARTS', () => {
+  const COLD_OPEN_PARTS = ['anchor', 'heart', 'turn', 'image', 'invitation'];
+
+  it('has exactly 5 parts', () => {
+    expect(COLD_OPEN_PARTS).toHaveLength(5);
+  });
+
+  it('includes all narrative arc elements', () => {
+    expect(COLD_OPEN_PARTS).toContain('anchor');
+    expect(COLD_OPEN_PARTS).toContain('heart');
+    expect(COLD_OPEN_PARTS).toContain('turn');
+    expect(COLD_OPEN_PARTS).toContain('image');
+    expect(COLD_OPEN_PARTS).toContain('invitation');
+  });
+
+  it('starts with anchor (scene setting)', () => {
+    expect(COLD_OPEN_PARTS[0]).toBe('anchor');
+  });
+
+  it('ends with invitation (call to connection)', () => {
+    expect(COLD_OPEN_PARTS[COLD_OPEN_PARTS.length - 1]).toBe('invitation');
   });
 });

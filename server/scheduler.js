@@ -11,6 +11,7 @@ const tts = require('./tts');
 const filler = require('./services/filler');
 const segmentEngine = require('./services/segmentEngine');
 const jobQueue = require('./services/jobQueue');
+const personaLoader = require('./services/personaLoader');
 const config = require('./config');
 const logger = require('./utils/logger');
 
@@ -404,6 +405,9 @@ class Scheduler {
               let consecutiveExpanded = 0;
               let bridgesSinceLastExpand = 0;
 
+              // Build enriched bridge context once for this batch
+              const bridgeContext = personaLoader.buildBridgeContext();
+
               for (let i = 0; i < payload.tracks.length - 1; i++) {
                 const prev = {
                   name: payload.tracks[i].trackName,
@@ -430,6 +434,7 @@ class Scheduler {
                 } else {
                   const bridgeInfo = await segmentEngine.generateBridgeLLM(prev, next, deepseek, {
                     expandContext: { nextSong: next, consecutiveExpanded, bridgesSinceLastExpand },
+                    bridgeContext,
                   });
                   logger.info('SCHEDULER', `Bridge[${i}] (${bridgeInfo.source}/${bridgeInfo.depth}): "${bridgeInfo.text.slice(0, 50)}..."`);
                   const bridgeSeg = {

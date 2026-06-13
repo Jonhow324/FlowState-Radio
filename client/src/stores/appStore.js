@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import api from '../services/api.js';
+import wsClient from '../services/ws.js';
 
 // Singleton audio element
 const audio = new Audio();
@@ -79,6 +80,11 @@ function _fadeMusicUp() {
 }
 
 const useAppStore = create((set, get) => ({
+  // Radio state
+  isRadioStarted: false,
+  welcomeAudioUrl: null,
+  _welcomeAudioEl: null, // Pre-unlocked audio element from user click
+
   // Current track info
   currentTrack: null,
   isPlaying: false,
@@ -488,6 +494,46 @@ const useAppStore = create((set, get) => ({
       set({ queue: res.data.queue || [] });
     } catch (err) {
       console.error('Refresh queue failed:', err);
+    }
+  },
+
+  // ── Radio Actions ──────────────────────────────────────────
+  /**
+   * Send start-radio signal to backend via WebSocket.
+   */
+  startRadio: () => {
+    wsClient.send({ type: 'start-radio' });
+  },
+
+  /**
+   * Handle radio-started event from backend.
+   * Plays welcome audio, loads queue, marks radio as started.
+   */
+  handleRadioStarted: (data) => {
+    set({ isRadioStarted: true, queue: data.queue || [] });
+
+    // Play welcome audio using pre-unlocked element (from user click)
+    if (data.welcomeAudio) {
+      const welcomeUrl = `${window.location.origin}${data.welcomeAudio}`;
+      const el = get()._welcomeAudioEl;
+      if (el) {
+        el.src = welcomeUrl;
+        el.volume = get().volume;
+        el.play().catch(() => {});
+        el.onended = () => {
+          set({ djMessage: 'FlowState Radio is on the air.' });
+        };
+      } else {
+        // Fallback: no pre-unlocked element, try creating new one (may be blocked)
+        const welcomeAudio = new Audio(welcomeUrl);
+        welcomeAudio.volume = get().volume;
+        welcomeAudio.play().catch(() => {});
+        welcomeAudio.onended = () => {
+          set({ djMessage: 'FlowState Radio is on the air.' });
+        };
+      }
+    } else {
+      set({ djMessage: 'FlowState Radio is on the air.' });
     }
   },
 }));

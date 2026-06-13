@@ -3,12 +3,21 @@
 const express = require('express');
 const cors = require('cors');
 const http = require('http');
+const fs = require('fs');
 const path = require('path');
 const config = require('./config');
 const logger = require('./utils/logger');
 const state = require('./state');
 const scheduler = require('./scheduler');
 const tts = require('./tts');
+
+// Idle shutdown: if no WS clients for 10 minutes, shut down
+const IDLE_TIMEOUT_MS = 10 * 60 * 1000;
+let idleTimer = null;
+
+// Welcome audio asset path
+const WELCOME_AUDIO_URL = '/assets/flowstate-welcome.mp3';
+const WELCOME_AUDIO_PATH = path.join(config.dataDir, 'assets', 'flowstate-welcome.mp3');
 
 async function startServer() {
   // Initialize database (async because sql.js loads WASM)
@@ -25,6 +34,7 @@ async function startServer() {
       'female-shaonv':    { zh: 'female-shaonv', en: 'female-yujie' },
       'female-yujie':     { zh: 'female-yujie', en: 'female-yujie' },
       'female-tianmei':   { zh: 'female-tianmei', en: 'female-yujie' },
+      'warm-bestie':      { zh: 'Chinese (Mandarin)_Warm_Bestie', en: 'female-yujie' },
     };
     const mapping = VOICE_MAP[savedVoice];
     if (mapping) {
@@ -60,6 +70,12 @@ async function startServer() {
     next();
   });
 
+  // ===== Static Files =====
+  // Serve TTS cache as static files (audio playback)
+  app.use('/tts', express.static(path.join(config.ttsCacheDir)));
+  // Serve permanent assets (welcome audio, etc.)
+  app.use('/assets', express.static(path.join(config.dataDir, 'assets')));
+
   // ===== WebSocket Setup =====
   const WebSocket = require('ws');
   const wss = new WebSocket.Server({ server, path: '/stream' });
@@ -67,20 +83,60 @@ async function startServer() {
   // Store connected clients
   const clients = new Set();
 
+  // ── Idle Timer Management ──
+  function startIdleTimer() {
+    if (idleTimer) return; // Already running
+    logger.info('SERVER', `No clients connected. Shutdown in ${IDLE_TIMEOUT_MS / 60000} min if no reconnection.`);
+    idleTimer = setTimeout(() => {
+      logger.info('SERVER', `Idle timeout (${IDLE_TIMEOUT_MS / 60000} min without clients). Shutting down...`);
+      gracefulShutdown();
+    }, IDLE_TIMEOUT_MS);
+  }
+
+  function cancelIdleTimer() {
+    if (idleTimer) {
+      clearTimeout(idleTimer);
+      idleTimer = null;
+      logger.info('SERVER', 'Idle timer cancelled (client connected).');
+    }
+  }
+
+  // Start idle timer on boot (no clients yet)
+  startIdleTimer();
+
   wss.on('connection', (ws) => {
     clients.add(ws);
+    cancelIdleTimer();
     logger.info('WS', `Client connected (total: ${clients.size})`);
+
+    // Send system info (queue state, welcome audio URL)
+    ws.send(JSON.stringify({
+      type: 'system',
+      data: {
+        message: 'Connected to FlowState',
+        level: 'info',
+        welcomeAudio: fs.existsSync(WELCOME_AUDIO_PATH) ? WELCOME_AUDIO_URL : null,
+        queueLength: state.getQueueLength(),
+      },
+    }));
+
+    // Handle client messages
+    ws.on('message', (raw) => {
+      try {
+        const msg = JSON.parse(raw);
+        if (msg.type === 'start-radio') {
+          handleStartRadio(broadcast);
+        }
+      } catch (_) { /* ignore malformed */ }
+    });
 
     ws.on('close', () => {
       clients.delete(ws);
       logger.info('WS', `Client disconnected (total: ${clients.size})`);
+      if (clients.size === 0) {
+        startIdleTimer();
+      }
     });
-
-    // Send welcome message on connect
-    ws.send(JSON.stringify({
-      type: 'system',
-      data: { message: 'Connected to FlowState', level: 'info' },
-    }));
   });
 
   // Helper: broadcast to all connected WS clients
@@ -96,9 +152,27 @@ async function startServer() {
   // Make broadcast available to route handlers
   app.set('broadcast', broadcast);
 
-  // ===== Static Files =====
-  // Serve TTS cache as static files (audio playback)
-  app.use('/tts', express.static(path.join(config.ttsCacheDir)));
+  // ── Start Radio Handler ──
+  function handleStartRadio(broadcastFn) {
+    logger.info('RADIO', 'Radio started by client — loading queue and sending welcome.');
+
+    // Load existing queue from SQLite
+    const queue = state.getQueue();
+    const currentState = state.getCurrentState();
+
+    // Broadcast radio-started event with queue + welcome audio
+    broadcastFn({
+      type: 'radio-started',
+      data: {
+        welcomeAudio: fs.existsSync(WELCOME_AUDIO_PATH) ? WELCOME_AUDIO_URL : null,
+        queue: queue,
+        currentTrack: currentState.now_playing_track_id ? {
+          trackId: currentState.now_playing_track_id,
+          isPlaying: Boolean(currentState.is_playing),
+        } : null,
+      },
+    });
+  }
 
   // ===== API Routes =====
   app.use('/api/chat', require('./api/chat'));
@@ -140,15 +214,21 @@ async function startServer() {
   });
 
   // ===== Graceful Shutdown =====
-  process.on('SIGINT', () => {
+  function gracefulShutdown() {
     logger.info('SERVER', 'Shutting down...');
+    cancelIdleTimer();
     scheduler.stop();
     state.saveDbSync();
     server.close(() => {
       logger.info('SERVER', 'Server closed');
       process.exit(0);
     });
-  });
+    // Force exit after 5s if connections don't close
+    setTimeout(() => process.exit(0), 5000);
+  }
+
+  process.on('SIGINT', gracefulShutdown);
+  process.on('SIGTERM', gracefulShutdown);
 
   // ===== Start Server =====
   server.listen(config.port, () => {

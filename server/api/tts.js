@@ -14,6 +14,7 @@ const VOICE_MAP = {
   'female-shaonv':    { zh: 'female-shaonv', en: 'female-yujie' },
   'female-yujie':     { zh: 'female-yujie', en: 'female-yujie' },
   'female-tianmei':   { zh: 'female-tianmei', en: 'female-yujie' },
+  'warm-bestie':      { zh: 'Chinese (Mandarin)_Warm_Bestie', en: 'female-yujie' },
 };
 
 // GET /api/tts/voice — current voice setting

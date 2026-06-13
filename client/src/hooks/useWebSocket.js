@@ -142,6 +142,11 @@ function useWebSocket() {
       ws.on('queue-update', (data) => {
         useAppStore.getState().setQueue(data.queue || []);
       });
+
+      // Handle radio-started (cold boot: welcome audio + queue load)
+      ws.on('radio-started', (data) => {
+        useAppStore.getState().handleRadioStarted(data);
+      });
     }
 
     init();

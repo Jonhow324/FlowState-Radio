@@ -5,8 +5,10 @@ import PlayerView from './views/PlayerView.jsx';
 import ProfileView from './views/ProfileView.jsx';
 import SettingsView from './views/SettingsView.jsx';
 import NowPlayingBar from './components/NowPlayingBar.jsx';
+import RadioSplash from './components/RadioSplash.jsx';
 import useMediaSession from './hooks/useMediaSession.js';
 import useWebSocket from './hooks/useWebSocket.js';
+import useAppStore from './stores/appStore.js';
 
 const VIEWS = {
   player: PlayerView,
@@ -16,6 +18,7 @@ const VIEWS = {
 
 function App() {
   const [activeView, setActiveView] = useState('player');
+  const isRadioStarted = useAppStore((s) => s.isRadioStarted);
   const ActiveComponent = VIEWS[activeView];
 
   // Enable system media controls (lock screen, notification bar)
@@ -23,6 +26,11 @@ function App() {
 
   // Connect WebSocket for real-time events (DJ talk, now-playing, queue updates)
   useWebSocket();
+
+  // Show splash screen until radio is explicitly started
+  if (!isRadioStarted) {
+    return <RadioSplash />;
+  }
 
   return (
     <div className="min-h-screen flex flex-col max-w-lg mx-auto relative">

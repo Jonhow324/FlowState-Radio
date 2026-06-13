@@ -65,6 +65,12 @@ class FlowStateWS {
     }
   }
 
+  send(message) {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(typeof message === 'string' ? message : JSON.stringify(message));
+    }
+  }
+
   disconnect() {
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);

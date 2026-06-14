@@ -411,66 +411,6 @@ function _buildBridgeUserPrompt(prevSong, nextSong, bridgeContext) {
   return parts.join('\n');
 }
 
-/**
- * Generate a bridge segment between two songs using LLM (DeepSeek rawChat).
- * Supports two modes:
- *   - shallow: brief one-sentence transition (default, ~75% of bridges)
- *   - deep: expanded 2-4 sentence commentary with personal angle (~25%)
- *
- * The depth mode is determined internally via shouldExpand() unless overridden.
- * Falls back to template-based generateBridgeText() on any failure.
- *
- * @param {object} prevSong - { name, artist, tags? }
- * @param {object} nextSong - { name, artist, tags? }
- * @param {object} deepseek - DeepSeekAdapter instance (must have rawChat)
- * @param {object} [options] - { temperature, maxTokens, timeout, depth: 'shallow'|'deep'|'auto', expandContext }
- * @returns {Promise<{ text, transitionStyle, source, depth }>}
- */
-async function generateBridgeLLM(prevSong, nextSong, deepseek, options = {}) {
-  const fallback = generateBridgeText(prevSong, nextSong);
-
-  // Guard: if deepseek is not provided or rawChat is missing, fall back
-  if (!deepseek || typeof deepseek.rawChat !== 'function') {
-    return { ...fallback, source: 'template', depth: 'shallow' };
-  }
-
-  // Determine depth
-  let depth = options.depth || 'auto';
-  if (depth === 'auto') {
-    const expandResult = shouldExpand(options.expandContext || {});
-    depth = expandResult.shouldExpand ? 'deep' : 'shallow';
-  }
-
-  const isDeep = depth === 'deep';
-  const systemPrompt = isDeep ? DEEP_SYSTEM_PROMPT : SHALLOW_SYSTEM_PROMPT;
-  const userPrompt = _buildBridgeUserPrompt(prevSong, nextSong);
-
-  const rawOptions = {
-    temperature: options.temperature ?? (isDeep ? 0.85 : 0.9),
-    maxTokens: options.maxTokens ?? (isDeep ? 250 : 100),
-    timeout: options.timeout ?? (isDeep ? 18000 : 12000),
-  };
-
-  try {
-    const text = await deepseek.rawChat(systemPrompt, userPrompt, rawOptions);
-
-    // Validate and clean
-    const cleaned = text.replace(/^["'"「『【]+/, '').replace(/["'"」』】]+$/, '').trim();
-    const minLen = isDeep ? 20 : 5;
-    const maxLen = isDeep ? 300 : 120;
-
-    if (!cleaned || cleaned.length < minLen || cleaned.length > maxLen) {
-      logger.warn('SEGMENT', `LLM bridge (${depth}) ${cleaned.length} chars out of [${minLen},${maxLen}], falling back`);
-      return { ...fallback, source: 'template', depth: 'shallow' };
-    }
-
-    return { text: cleaned, transitionStyle: 'outro', source: 'llm', depth };
-  } catch (err) {
-    logger.warn('SEGMENT', `LLM bridge (${depth}) failed: ${err.message}, falling back to template`);
-    return { ...fallback, source: 'template', depth: 'shallow' };
-  }
-}
-
 // ── Cold Open Generation (Narrative Arc) ─────────────────────
 
 /**

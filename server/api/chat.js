@@ -412,7 +412,6 @@ router.post('/', async (req, res) => {
           // ── Segment Processing (Phase 1) ────────────────────────
           // After NCM confirms tracks, normalize LLM segments and generate bridges.
           let normalizedSegments = [];
-          let brainRhythmMap = new Map(); // gap index → brain's segment decision
 
           if (aiResult.segments && Array.isArray(aiResult.segments) && resolvedTracks.length > 0) {
             normalizedSegments = segmentEngine.normalizeSegments(
@@ -422,14 +421,7 @@ router.post('/', async (req, res) => {
             const segMap = segmentEngine.buildSegmentMap(normalizedSegments);
             state.setSegments(segMap);
 
-            // Build rhythm map: which gaps did the brain explicitly define?
-            for (const seg of normalizedSegments) {
-              if (seg.position === 'between_tracks') {
-                brainRhythmMap.set(seg.anchorTrackIndex, seg);
-              }
-            }
-
-            logger.info('CHAT', `Segments normalized: ${normalizedSegments.length} (${normalizedSegments.map(s => s.type).join(', ')}), brain rhythm gaps: ${brainRhythmMap.size}`);
+            logger.info('CHAT', `Segments normalized: ${normalizedSegments.length} (${normalizedSegments.map(s => s.type).join(', ')})`);
           }
 
           // ── Phase 3: Enqueue bridge + back_announce + silence generation ──
@@ -440,20 +432,18 @@ router.post('/', async (req, res) => {
               artist: t.artist,
             }));
 
-            // Serialize brain rhythm decisions for the bridge loop
-            const rhythmDecisions = {};
-            for (const [gapIdx, seg] of brainRhythmMap) {
-              rhythmDecisions[gapIdx] = { type: seg.type, depth: seg.metadata?.depth || seg.transitionStyle || 'shallow', text: seg.text };
-            }
+            // Fill missing gaps with deterministic fallback (night→silence, day→bridge)
+            const completeDecisions = segmentEngine.fillMissingSegments(
+              resolvedTracks.length, normalizedSegments
+            );
 
             jobQueue.enqueue({
               type: 'bridge_generation',
               dedupKey: `bridge:chat:${Date.now()}:${process.hrtime.bigint()}`,
-              payload: { tracks: tracksSnapshot, rhythmDecisions },
+              payload: { tracks: tracksSnapshot, completeDecisions: Array.from(completeDecisions.entries()) },
               execute: async (payload) => {
-                let consecutiveBridges = 0;
-                let consecutiveExpanded = 0;
-                let bridgesSinceLastExpand = 0;
+                // Reconstruct Map from serialized entries
+                const decisionMap = new Map(payload.completeDecisions);
 
                 // Build enriched bridge context once for this batch
                 const bridgeContext = personaLoader.buildBridgeContext();
@@ -470,26 +460,23 @@ router.post('/', async (req, res) => {
                     tags: state.getTrackMeta(payload.tracks[i + 1].trackId)?.tags || '',
                   };
 
-                  // ── Check brain's rhythm decision first ──
-                  const brainDecision = payload.rhythmDecisions?.[i];
+                  // ── Look up decision (Brain or fillMissingSegments fallback) ──
+                  const decision = decisionMap.get(i);
 
-                  if (brainDecision?.type === 'silence') {
-                    // Brain decided this gap should be silent
-                    const silenceSeg = segmentEngine.buildSilenceSegment(i, 'brain_rhythm', 'chat');
+                  if (decision?.type === 'silence') {
+                    // Silence — either Brain decided or night-time fallback
+                    const reason = decision._filled ? 'fill_night' : 'brain_decision';
+                    const silenceSeg = segmentEngine.buildSilenceSegment(i, reason, 'chat');
                     state.addSegment(`between_tracks:${i}`, silenceSeg);
                     broadcast({ type: 'segment-ready', data: silenceSeg });
-                    logger.info('CHAT', `Gap[${i}] brain→silence`);
-                    consecutiveBridges = 0;
-                    bridgesSinceLastExpand++;
-                  } else if (brainDecision?.type === 'bridge') {
-                    // Brain decided this gap should have a bridge — generate text with brain's depth
-                    const brainDepth = (brainDecision.depth === 'deep') ? 'deep' : 'shallow';
+                    logger.info('CHAT', `Gap[${i}] → silence (${reason})`);
+                  } else {
+                    // Bridge — Brain decided or daytime fallback
                     const bridgeInfo = await segmentEngine.generateBridgeLLM(prev, next, brain.deepseek, {
-                      depth: brainDepth, // Use brain's depth decision directly
-                      expandContext: { nextSong: next, consecutiveExpanded, bridgesSinceLastExpand },
                       bridgeContext,
                     });
-                    logger.info('CHAT', `Gap[${i}] brain→${brainDepth}: (${bridgeInfo.source}/${bridgeInfo.depth}): "${bridgeInfo.text.slice(0, 50)}..."`);
+                    const decisionSource = decision?._filled ? 'fill' : 'brain';
+                    logger.info('CHAT', `Gap[${i}] ${decisionSource}: (${bridgeInfo.source}): "${bridgeInfo.text.slice(0, 50)}..."`);
                     const bridgeSeg = {
                       id: `seg:bridge:${i}:post`,
                       type: 'bridge',
@@ -499,57 +486,18 @@ router.post('/', async (req, res) => {
                       ttsUrl: null,
                       ttsStatus: 'pending',
                       transitionStyle: bridgeInfo.transitionStyle,
-                      metadata: { prevSong: prev, nextSong: next, bridgeSource: bridgeInfo.source, depth: bridgeInfo.depth, brainDecision: true },
+                      metadata: { prevSong: prev, nextSong: next, bridgeSource: bridgeInfo.source, brainDecision: !decision?._filled },
                     };
                     await segmentEngine.resolveSegmentTTS(bridgeSeg);
                     state.addSegment(`between_tracks:${i}`, bridgeSeg);
                     broadcast({ type: 'segment-ready', data: bridgeSeg });
-                    consecutiveBridges++;
-                    if (bridgeInfo.depth === 'deep') { consecutiveExpanded++; bridgesSinceLastExpand = 0; }
-                    else { consecutiveExpanded = 0; bridgesSinceLastExpand++; }
-                  } else {
-                    // ── No brain decision — fall back to probability-based rhythm ──
-                    const silenceResult = segmentEngine.shouldSilence({
-                      prevSong: prev, nextSong: next, consecutiveBridges,
-                    });
-
-                    if (silenceResult.shouldSilence) {
-                      const silenceSeg = segmentEngine.buildSilenceSegment(i, silenceResult.reason, 'chat');
-                      state.addSegment(`between_tracks:${i}`, silenceSeg);
-                      broadcast({ type: 'segment-ready', data: silenceSeg });
-                      consecutiveBridges = 0;
-                      bridgesSinceLastExpand++;
-                    } else {
-                      const bridgeInfo = await segmentEngine.generateBridgeLLM(prev, next, brain.deepseek, {
-                        expandContext: { nextSong: next, consecutiveExpanded, bridgesSinceLastExpand },
-                        bridgeContext,
-                      });
-                      logger.info('CHAT', `Gap[${i}] fallback (${bridgeInfo.source}/${bridgeInfo.depth}): "${bridgeInfo.text.slice(0, 50)}..."`);
-                      const bridgeSeg = {
-                        id: `seg:bridge:${i}:post`,
-                        type: 'bridge',
-                        position: 'between_tracks',
-                        anchorTrackIndex: i,
-                        text: bridgeInfo.text,
-                        ttsUrl: null,
-                        ttsStatus: 'pending',
-                        transitionStyle: bridgeInfo.transitionStyle,
-                        metadata: { prevSong: prev, nextSong: next, bridgeSource: bridgeInfo.source, depth: bridgeInfo.depth },
-                      };
-                      await segmentEngine.resolveSegmentTTS(bridgeSeg);
-                      state.addSegment(`between_tracks:${i}`, bridgeSeg);
-                      broadcast({ type: 'segment-ready', data: bridgeSeg });
-                      consecutiveBridges++;
-                      if (bridgeInfo.depth === 'deep') { consecutiveExpanded++; bridgesSinceLastExpand = 0; }
-                      else { consecutiveExpanded = 0; bridgesSinceLastExpand++; }
-                    }
                   }
 
-                  // Back announce — check brain's decision for after_track too, else 50% probability
-                  const brainBackAnnounce = Object.values(payload.rhythmDecisions || {}).find(
-                    d => d._anchorIndex === i && d.type === 'back_announce'
+                  // Back announce — only if Brain explicitly included one
+                  const brainBackAnnounce = normalizedSegments.find(
+                    s => s.position === 'after_track' && s.anchorTrackIndex === i
                   );
-                  if (brainBackAnnounce || Math.random() < 0.5) {
+                  if (brainBackAnnounce) {
                     const backSeg = segmentEngine.buildBackAnnounceSegment(prev, i, 'chat');
                     await segmentEngine.resolveSegmentTTS(backSeg);
                     state.addSegment(`after_track:${i}`, backSeg);
@@ -557,15 +505,18 @@ router.post('/', async (req, res) => {
                   }
                 }
 
-                // Last track: also consider back_announce
+                // Last track: back_announce only if Brain explicitly included one
                 if (payload.tracks.length > 0) {
                   const lastIdx = payload.tracks.length - 1;
-                  const lastTrack = {
-                    name: payload.tracks[lastIdx].trackName,
-                    artist: payload.tracks[lastIdx].artist,
-                    tags: state.getTrackMeta(payload.tracks[lastIdx].trackId)?.tags || '',
-                  };
-                  if (Math.random() < 0.4) {
+                  const lastBackAnnounce = normalizedSegments.find(
+                    s => s.position === 'after_track' && s.anchorTrackIndex === lastIdx
+                  );
+                  if (lastBackAnnounce) {
+                    const lastTrack = {
+                      name: payload.tracks[lastIdx].trackName,
+                      artist: payload.tracks[lastIdx].artist,
+                      tags: state.getTrackMeta(payload.tracks[lastIdx].trackId)?.tags || '',
+                    };
                     const lastBack = segmentEngine.buildBackAnnounceSegment(lastTrack, lastIdx, 'chat-last');
                     await segmentEngine.resolveSegmentTTS(lastBack);
                     state.addSegment(`after_track:${lastIdx}`, lastBack);

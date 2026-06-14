@@ -152,9 +152,11 @@ class DeepSeekAdapter {
    * Lightweight text generation — no JSON parsing, no circuit breaker integration.
    * Used for bridge text, back_announce, and other short-form generation.
    *
+   * Includes timeout + single retry on transient errors (Claudio-FM pattern).
+   *
    * @param {string} systemPrompt - System prompt
    * @param {string} userPrompt - User message
-   * @param {object} [options] - { temperature, maxTokens }
+   * @param {object} [options] - { temperature, maxTokens, timeout, retries }
    * @returns {Promise<string>} Generated text
    */
   async rawChat(systemPrompt, userPrompt, options = {}) {
@@ -162,42 +164,90 @@ class DeepSeekAdapter {
       throw new Error('Circuit breaker open');
     }
 
-    const response = await axios.post(
-      `${DEEPSEEK_BASE_URL}/v1/chat/completions`,
-      {
-        model: this.model,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt },
-        ],
-        temperature: options.temperature ?? 0.8,
-        max_tokens: options.maxTokens ?? 150,
-      },
-      {
-        headers: {
-          'Authorization': `Bearer ${this.apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        timeout: options.timeout ?? 15000,
-      }
-    );
+    const timeout = options.timeout ?? 15000;
+    const maxRetries = options.retries ?? 1;
 
-    const content = response.data?.choices?.[0]?.message?.content;
-    if (!content) throw new Error('Empty response');
-    this._recordSuccess();
-    return content.trim();
+    let lastError;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        if (attempt > 0) {
+          logger.warn('DEEPSEEK', `rawChat retry ${attempt}/${maxRetries}`);
+          await new Promise((r) => setTimeout(r, 1000));
+        }
+
+        const response = await Promise.race([
+          axios.post(
+            `${DEEPSEEK_BASE_URL}/v1/chat/completions`,
+            {
+              model: this.model,
+              messages: [
+                { role: 'system', content: systemPrompt },
+                { role: 'user', content: userPrompt },
+              ],
+              temperature: options.temperature ?? 0.8,
+              max_tokens: options.maxTokens ?? 150,
+            },
+            {
+              headers: {
+                'Authorization': `Bearer ${this.apiKey}`,
+                'Content-Type': 'application/json',
+              },
+              timeout,
+            }
+          ),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error(`rawChat timeout (${timeout}ms)`)), timeout)
+          ),
+        ]);
+
+        const content = response.data?.choices?.[0]?.message?.content;
+        if (!content) throw new Error('Empty response');
+        this._recordSuccess();
+        return content.trim();
+      } catch (error) {
+        lastError = error;
+
+        if (!this._isTransientError(error) && !error.message?.includes('timeout')) {
+          this._recordFailure();
+          throw error;
+        }
+
+        if (attempt === maxRetries) {
+          this._recordFailure();
+        }
+      }
+    }
+
+    throw lastError;
   }
 
   /**
    * Parse AI response JSON
    * New format: { say, songs: [{name, artist}], reason, segue }
+   *
+   * Claudio-FM pattern: on parse failure, degrade raw text to `say` field
+   * instead of throwing — ensures the DJ never goes silent.
    */
   parseJSON(raw) {
     const cleaned = raw
       .replace(/```json\n?/g, '')
       .replace(/```\n?/g, '')
       .trim();
-    const parsed = JSON.parse(cleaned);
+
+    let parsed;
+    try {
+      parsed = JSON.parse(cleaned);
+    } catch (err) {
+      logger.warn('DEEPSEEK', `JSON parse failed, falling back to say field: ${err.message}`);
+      return {
+        say: cleaned.slice(0, 500),
+        songs: [],
+        play: [],
+        reason: 'json_parse_fallback',
+        segue: null,
+        segments: null,
+      };
+    }
 
     // Support both old (play: [ids]) and new (songs: [{name, artist}]) formats
     const songs = Array.isArray(parsed.songs)

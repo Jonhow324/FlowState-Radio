@@ -76,58 +76,35 @@ async function buildRefillPrompt() {
  *
  * This is the Claudio-FM insight: bridge prompts should be lean.
  *
+ * The LLM decides text length freely based on context — no depth parameter.
+ *
  * Layers: persona + time + recentPlays + song pair
  *
  * @param {object} prevSong - { name, artist, tags? }
  * @param {object} nextSong - { name, artist, tags? }
- * @param {'shallow'|'deep'} depth - Bridge depth mode
  * @param {object} [bridgeContext] - Pre-built context from personaLoader.buildBridgeContext()
  * @returns {{ systemPrompt: string, userPrompt: string }}
  */
-function buildBridgePrompt(prevSong, nextSong, depth, bridgeContext) {
+function buildBridgePrompt(prevSong, nextSong, bridgeContext) {
   const bc = bridgeContext || personaLoader.buildBridgeContext();
   const persona = bc.persona || personaLoader.getBridgePersona();
   const timeContext = bc.timeContext || personaLoader.getTimeContext();
   const recentPlays = bc.recentPlays || '';
 
-  // System prompt varies by depth
-  let systemPrompt;
-  if (depth === 'deep') {
-    systemPrompt = [
-      persona,
-      '',
-      '你觉得下一首歌特别契合当下的氛围，想和听众多聊几句。',
-      '',
-      '请从以下角度中自然选择一个展开（不要列出角度名称，直接说）：',
-      '1. 这首歌或歌手背后的创作故事、有趣轶事',
-      '2. 音乐中值得细细品味的细节（某段旋律、编曲、歌词的妙处）',
-      '3. 这首歌带来的情绪共鸣，为什么此刻听它格外动人',
-      '4. 歌曲和当下场景/时间/心境的独特联系',
-      '',
-      '要求：',
-      '- 2-4句话（60-200字），像跟老朋友聊天',
-      '- 要有具体的细节，不要空泛的赞美或套话',
-      '- 不要引号、不要前缀、不要列点',
-      '- 第一句话要自然衔接上一首歌，后面的话展开聊下一首',
-      '- 语气真诚，像真的在分享自己对音乐的感受',
-      '',
-      timeContext,
-    ].join('\n');
-  } else {
-    systemPrompt = [
-      persona,
-      '',
-      '你的任务是用一句话串联两首歌之间的过渡，让听众觉得音乐在自然流动。',
-      '',
-      '要求：',
-      '- 只输出一句话（15-60字），不要引号、不要前缀',
-      '- 可以提到歌名、歌手、情绪、风格上的联系',
-      '- 语气像朋友在耳边轻声说话',
-      '- 不要用"让我们"、"接下来"这类套话开头',
-      '',
-      timeContext,
-    ].join('\n');
-  }
+  const systemPrompt = [
+    persona,
+    '',
+    '你的任务是用自然的话语串联两首歌之间的过渡。',
+    '',
+    '要求：',
+    '- 简短过渡或展开聊都可以，根据你对这两首歌之间联系的感受自由决定',
+    '- 语气像朋友在耳边轻声说话，不要播音腔',
+    '- 不要引号、不要前缀、不要列点',
+    '- 可以提到歌名、歌手、情绪、风格上的联系，或者某个有趣的细节',
+    '- 不要用"让我们"、"接下来"这类套话开头',
+    '',
+    timeContext,
+  ].join('\n');
 
   // User prompt: recent plays + song pair
   const prevName = prevSong.name || prevSong.trackName || '未知';

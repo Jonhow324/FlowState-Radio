@@ -388,10 +388,6 @@ class Scheduler {
             dedupKey: `bridge:refill:${batchId}`,
             payload: { tracks: tracksSnapshot, batchId },
             execute: async (payload) => {
-              let consecutiveBridges = 0;
-              let consecutiveExpanded = 0;
-              let bridgesSinceLastExpand = 0;
-
               // Build enriched bridge context once for this batch
               const bridgeContext = personaLoader.buildBridgeContext();
 
@@ -407,23 +403,21 @@ class Scheduler {
                   tags: state.getTrackMeta(payload.tracks[i + 1].trackId)?.tags || '',
                 };
 
-                // Silence check
-                const silenceResult = segmentEngine.shouldSilence({
-                  prevSong: prev, nextSong: next, consecutiveBridges,
-                });
+                // Refill path: no Brain rhythm decisions available
+                // Deterministic rule: same artist → silence, else → shallow bridge
+                const sameArtist = prev.artist && next.artist &&
+                  prev.artist.toLowerCase() === next.artist.toLowerCase();
 
-                if (silenceResult.shouldSilence) {
-                  const silenceSeg = segmentEngine.buildSilenceSegment(i, silenceResult.reason, `refill${payload.batchId}`);
+                if (sameArtist) {
+                  const silenceSeg = segmentEngine.buildSilenceSegment(i, 'same_artist_refill', `refill${payload.batchId}`);
                   state.addSegment(`between_tracks:refill:${payload.batchId}:${i}`, silenceSeg);
                   broadcast({ type: 'segment-ready', data: silenceSeg });
-                  consecutiveBridges = 0;
-                  bridgesSinceLastExpand++;
+                  logger.info('SCHEDULER', `Bridge[${i}] → silence (same_artist_refill)`);
                 } else {
                   const bridgeInfo = await segmentEngine.generateBridgeLLM(prev, next, deepseek, {
-                    expandContext: { nextSong: next, consecutiveExpanded, bridgesSinceLastExpand },
                     bridgeContext,
                   });
-                  logger.info('SCHEDULER', `Bridge[${i}] (${bridgeInfo.source}/${bridgeInfo.depth}): "${bridgeInfo.text.slice(0, 50)}..."`);
+                  logger.info('SCHEDULER', `Bridge[${i}] (${bridgeInfo.source}): "${bridgeInfo.text.slice(0, 50)}..."`);
                   const bridgeSeg = {
                     id: `seg:bridge:refill:${payload.batchId}:${i}`,
                     type: 'bridge',
@@ -433,29 +427,11 @@ class Scheduler {
                     ttsUrl: null,
                     ttsStatus: 'pending',
                     transitionStyle: bridgeInfo.transitionStyle,
-                    metadata: { prevSong: prev, nextSong: next, bridgeSource: bridgeInfo.source, depth: bridgeInfo.depth },
+                    metadata: { prevSong: prev, nextSong: next, bridgeSource: bridgeInfo.source },
                   };
                   await segmentEngine.resolveSegmentTTS(bridgeSeg);
                   state.addSegment(`between_tracks:refill:${payload.batchId}:${i}`, bridgeSeg);
                   broadcast({ type: 'segment-ready', data: bridgeSeg });
-                  consecutiveBridges++;
-
-                  // Update expansion state
-                  if (bridgeInfo.depth === 'deep') {
-                    consecutiveExpanded++;
-                    bridgesSinceLastExpand = 0;
-                  } else {
-                    consecutiveExpanded = 0;
-                    bridgesSinceLastExpand++;
-                  }
-                }
-
-                // Back announce (~50% probability)
-                if (Math.random() < 0.5) {
-                  const backSeg = segmentEngine.buildBackAnnounceSegment(prev, i, `refill${payload.batchId}`);
-                  await segmentEngine.resolveSegmentTTS(backSeg);
-                  state.addSegment(`after_track:refill:${payload.batchId}:${i}`, backSeg);
-                  broadcast({ type: 'segment-ready', data: backSeg });
                 }
               }
             },

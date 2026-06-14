@@ -160,17 +160,8 @@ async function generateBridgeLLM(prevSong, nextSong, deepseek, options = {}) {
   const fallback = generateBridgeText(prevSong, nextSong);
 
   if (!deepseek || typeof deepseek.rawChat !== 'function') {
-    return { ...fallback, source: 'template', depth: 'shallow' };
+    return { ...fallback, source: 'template' };
   }
-
-  // Determine depth
-  let depth = options.depth || 'auto';
-  if (depth === 'auto') {
-    const expandResult = shouldExpand(options.expandContext || {});
-    depth = expandResult.shouldExpand ? 'deep' : 'shallow';
-  }
-
-  const isDeep = depth === 'deep';
 
   const prevName = prevSong.name || prevSong.trackName || '未知';
   const prevArtist = prevSong.artist || '未知';
@@ -184,49 +175,21 @@ async function generateBridgeLLM(prevSong, nextSong, deepseek, options = {}) {
 
   try {
     const text = await deepseek.rawChat('system', userPrompt, {
-      temperature: options.temperature ?? (isDeep ? 0.85 : 0.9),
-      maxTokens: options.maxTokens ?? (isDeep ? 250 : 100),
-      timeout: options.timeout ?? (isDeep ? 18000 : 12000),
+      temperature: options.temperature ?? 0.85,
+      maxTokens: options.maxTokens ?? 200,
+      timeout: options.timeout ?? 15000,
     });
 
     const cleaned = text.replace(/^["'"「『【]+/, '').replace(/["'"」』】]+$/, '').trim();
-    const minLen = isDeep ? 20 : 5;
-    const maxLen = isDeep ? 300 : 120;
 
-    if (!cleaned || cleaned.length < minLen || cleaned.length > maxLen) {
-      return { ...fallback, source: 'template', depth: 'shallow' };
+    if (!cleaned) {
+      return { ...fallback, source: 'template' };
     }
 
-    return { text: cleaned, transitionStyle: 'outro', source: 'llm', depth };
+    return { text: cleaned, transitionStyle: 'outro', source: 'llm' };
   } catch (err) {
-    return { ...fallback, source: 'template', depth: 'shallow' };
+    return { ...fallback, source: 'template' };
   }
-}
-
-function shouldExpand(context = {}) {
-  const { consecutiveExpanded = 0, bridgesSinceLastExpand = 0 } = context;
-  const hour = typeof context.hour === 'number' ? context.hour : 12;
-
-  if (consecutiveExpanded >= 1) {
-    return { shouldExpand: false, probability: 0, reason: 'consecutive_limit' };
-  }
-  if (bridgesSinceLastExpand < 2) {
-    return { shouldExpand: false, probability: 0, reason: 'too_soon' };
-  }
-
-  let probability = 0.25;
-  const nextTags = ((context.nextSong?.tags || '') + ' ' + (context.nextSong?.mood || '')).toLowerCase();
-  const emotionalTags = ['emotional', 'ambient', 'instrumental', 'classical', 'post-rock', 'shoegaze', 'dream pop'];
-  if (emotionalTags.some(t => nextTags.includes(t))) {
-    probability += 0.20;
-  }
-  const isLateNight = hour >= 22 || hour < 5;
-  if (isLateNight) {
-    probability += 0.15;
-  }
-
-  const expand = Math.random() < probability;
-  return { shouldExpand: expand, probability: Math.round(probability * 100) / 100, reason: expand ? 'selected' : 'probability' };
 }
 
 function getSegmentsForTrack(segmentMap, trackIndex) {
@@ -272,65 +235,6 @@ function generateBackAnnounce(song, options = {}) {
   return { text: pickRandom(templates), transitionStyle: 'none' };
 }
 
-const SILENCE_CONFIG = {
-  nightHoursStart: 23,
-  nightHoursEnd: 6,
-  nightSilenceProbability: 0.5,
-  consecutiveBridgeLimit: 3,
-  sameArtistBoost: 0.3,
-  sameGenreBoost: 0.15,
-  emotionalTags: new Set([
-    'emotional', 'ambient', 'instrumental', 'classical',
-    'post-rock', 'shoegaze', 'dream pop', '冥想', '纯音乐',
-    '新世纪', '氛围', '后摇', '治愈',
-  ]),
-  genreTags: new Set([
-    'rock', 'pop', 'jazz', 'electronic', 'hip-hop', 'r&b', 'folk',
-    'indie', 'punk', 'metal', 'blues', 'country', 'reggae',
-    '摇滚', '流行', '爵士', '电子', '民谣', '嘻哈',
-  ]),
-};
-
-function shouldSilence(context = {}) {
-  const { prevSong, nextSong, consecutiveBridges = 0 } = context;
-  const hour = typeof context.hour === 'number' ? context.hour : 12;
-
-  const prevTags = ((prevSong?.tags || '') + ' ' + (prevSong?.mood || '')).toLowerCase();
-  const nextTags = ((nextSong?.tags || '') + ' ' + (nextSong?.mood || '')).toLowerCase();
-  const prevIsEmotional = [...SILENCE_CONFIG.emotionalTags].some(t => prevTags.includes(t));
-
-  if (prevIsEmotional) return { shouldSilence: true, reason: 'emotional_prev' };
-
-  // Same artist check
-  const prevArtist = (prevSong?.artist || '').toLowerCase().trim();
-  const nextArtist = (nextSong?.artist || '').toLowerCase().trim();
-  if (prevArtist && nextArtist && prevArtist === nextArtist) {
-    return { shouldSilence: true, reason: 'same_artist' };
-  }
-
-  const isNight = hour >= SILENCE_CONFIG.nightHoursStart || hour < SILENCE_CONFIG.nightHoursEnd;
-  if (isNight && Math.random() < SILENCE_CONFIG.nightSilenceProbability) {
-    return { shouldSilence: true, reason: 'night_mode' };
-  }
-
-  if (consecutiveBridges >= SILENCE_CONFIG.consecutiveBridgeLimit) {
-    return { shouldSilence: true, reason: 'bridge_fatigue' };
-  }
-
-  // Same genre check
-  if (prevTags && nextTags) {
-    const sharedGenres = [...SILENCE_CONFIG.genreTags].filter(t => prevTags.includes(t) && nextTags.includes(t));
-    if (sharedGenres.length > 0 && Math.random() < SILENCE_CONFIG.sameGenreBoost) {
-      return { shouldSilence: true, reason: `same_genre (${sharedGenres[0]})` };
-    }
-  }
-
-  const nextIsEmotional = [...SILENCE_CONFIG.emotionalTags].some(t => nextTags.includes(t));
-  if (nextIsEmotional) return { shouldSilence: true, reason: 'emotional_next' };
-
-  return { shouldSilence: false, reason: null };
-}
-
 function buildBackAnnounceSegment(song, anchorIndex, idPrefix = 'back') {
   const info = generateBackAnnounce(song);
   return {
@@ -358,6 +262,34 @@ function buildSilenceSegment(anchorIndex, reason, idPrefix = 'silence') {
     transitionStyle: 'none',
     metadata: { silenceReason: reason },
   };
+}
+
+function fillMissingSegments(trackCount, brainSegments) {
+  const decisions = new Map();
+
+  for (const seg of (brainSegments || [])) {
+    if (seg.position === 'between_tracks' && typeof seg.anchorTrackIndex === 'number') {
+      decisions.set(seg.anchorTrackIndex, seg);
+    }
+  }
+
+  const hour = new Date().getHours();
+  const isNight = hour >= 23 || hour < 6;
+  const defaultType = isNight ? 'silence' : 'bridge';
+
+  for (let i = 0; i < trackCount - 1; i++) {
+    if (!decisions.has(i)) {
+      decisions.set(i, {
+        type: defaultType,
+        anchorTrackIndex: i,
+        position: 'between_tracks',
+        text: '',
+        _filled: true,
+      });
+    }
+  }
+
+  return decisions;
 }
 
 // ── Test Data ────────────────────────────────────────────────
@@ -789,12 +721,10 @@ describe('Segment Engine', () => {
       const result = await generateBridgeLLM(
         { name: '晴天', artist: '周杰伦' },
         { name: '红豆', artist: '王菲' },
-        deepseek,
-        { depth: 'shallow' }
+        deepseek
       );
       expect(result.text).toBe('从摇滚到民谣，情绪在慢慢转弯');
       expect(result.source).toBe('llm');
-      expect(result.depth).toBe('shallow');
       expect(result.transitionStyle).toBe('outro');
     });
 
@@ -803,8 +733,7 @@ describe('Segment Engine', () => {
       await generateBridgeLLM(
         { name: 'SongA', artist: 'ArtistA', tags: 'rock' },
         { name: 'SongB', artist: 'ArtistB', tags: 'jazz' },
-        deepseek,
-        { depth: 'shallow' }
+        deepseek
       );
       expect(deepseek.rawChat).toHaveBeenCalledTimes(1);
       const userPrompt = deepseek.rawChat.mock.calls[0][1];
@@ -824,7 +753,6 @@ describe('Segment Engine', () => {
       );
       expect(result.text).toBeTruthy();
       expect(result.source).toBe('template');
-      expect(result.depth).toBe('shallow');
     });
 
     it('falls back to template when deepseek has no rawChat method', async () => {
@@ -834,7 +762,6 @@ describe('Segment Engine', () => {
         { think: () => {} }
       );
       expect(result.source).toBe('template');
-      expect(result.depth).toBe('shallow');
     });
 
     it('falls back to template when LLM throws an error', async () => {
@@ -842,12 +769,10 @@ describe('Segment Engine', () => {
       const result = await generateBridgeLLM(
         { name: '晴天', artist: '周杰伦' },
         { name: '红豆', artist: '王菲' },
-        deepseek,
-        { depth: 'shallow' }
+        deepseek
       );
       expect(result.text).toBeTruthy();
       expect(result.source).toBe('template');
-      expect(result.depth).toBe('shallow');
     });
 
     it('falls back to template when LLM returns empty string', async () => {
@@ -855,33 +780,32 @@ describe('Segment Engine', () => {
       const result = await generateBridgeLLM(
         { name: '晴天', artist: '周杰伦' },
         { name: '红豆', artist: '王菲' },
-        deepseek,
-        { depth: 'shallow' }
+        deepseek
       );
       expect(result.source).toBe('template');
     });
 
-    it('falls back to template when LLM returns text too short for shallow', async () => {
-      const deepseek = createMockDeepseek('太短');
+    it('accepts any non-empty LLM output regardless of length', async () => {
+      const deepseek = createMockDeepseek('短');
       const result = await generateBridgeLLM(
         { name: '晴天', artist: '周杰伦' },
         { name: '红豆', artist: '王菲' },
-        deepseek,
-        { depth: 'shallow' }
+        deepseek
       );
-      expect(result.source).toBe('template');
+      expect(result.source).toBe('llm');
+      expect(result.text).toBe('短');
     });
 
-    it('falls back to template when LLM returns text too long for shallow (>120)', async () => {
+    it('accepts long LLM output without truncation', async () => {
       const longText = '这是一段非常非常长的文字，'.repeat(20);
       const deepseek = createMockDeepseek(longText);
       const result = await generateBridgeLLM(
         { name: '晴天', artist: '周杰伦' },
         { name: '红豆', artist: '王菲' },
-        deepseek,
-        { depth: 'shallow' }
+        deepseek
       );
-      expect(result.source).toBe('template');
+      expect(result.source).toBe('llm');
+      expect(result.text).toBe(longText.trim());
     });
 
     it('strips leading/trailing quotes from LLM response', async () => {
@@ -889,8 +813,7 @@ describe('Segment Engine', () => {
       const result = await generateBridgeLLM(
         { name: '晴天', artist: '周杰伦' },
         { name: '红豆', artist: '王菲' },
-        deepseek,
-        { depth: 'shallow' }
+        deepseek
       );
       expect(result.text).toBe('从摇滚到民谣，情绪在慢慢转弯');
       expect(result.source).toBe('llm');
@@ -901,8 +824,7 @@ describe('Segment Engine', () => {
       const result = await generateBridgeLLM(
         { name: '晴天', artist: '周杰伦' },
         { name: '红豆', artist: '王菲' },
-        deepseek,
-        { depth: 'shallow' }
+        deepseek
       );
       expect(result.text).toBe('音乐在两种风格间自由穿梭');
       expect(result.source).toBe('llm');
@@ -913,8 +835,7 @@ describe('Segment Engine', () => {
       await generateBridgeLLM(
         { trackName: 'TrackA', artist: 'A' },
         { trackName: 'TrackB', artist: 'B' },
-        deepseek,
-        { depth: 'shallow' }
+        deepseek
       );
       const userPrompt = deepseek.rawChat.mock.calls[0][1];
       expect(userPrompt).toContain('TrackA');
@@ -926,221 +847,10 @@ describe('Segment Engine', () => {
       await generateBridgeLLM(
         { name: 'A', artist: 'B' },
         { name: 'C', artist: 'D' },
-        deepseek,
-        { depth: 'shallow' }
+        deepseek
       );
       const userPrompt = deepseek.rawChat.mock.calls[0][1];
       expect(userPrompt).not.toContain('标签');
-    });
-
-    // ── Deep mode tests ──
-
-    it('uses deep mode with higher maxTokens when depth: "deep"', async () => {
-      const deepText = '这首歌的贝斯线很有意思，你注意听第二段副歌进来之前那四小节的留白，刚好给了情绪一个喘息的空间。王菲唱歌就是这样，越是克制的地方越有力量。';
-      const deepseek = createMockDeepseek(deepText);
-      const result = await generateBridgeLLM(
-        { name: '红豆', artist: '王菲', tags: 'emotional' },
-        { name: '匆匆那年', artist: '王菲', tags: 'ballad' },
-        deepseek,
-        { depth: 'deep' }
-      );
-      expect(result.text).toBe(deepText);
-      expect(result.source).toBe('llm');
-      expect(result.depth).toBe('deep');
-      // Check that rawChat was called with higher maxTokens
-      const opts = deepseek.rawChat.mock.calls[0][2];
-      expect(opts.maxTokens).toBe(250);
-      expect(opts.temperature).toBe(0.85);
-    });
-
-    it('accepts longer text in deep mode (up to 300 chars)', async () => {
-      const longDeepText = '这是一段很长的深度评论文字，'.repeat(15) + '刚好在范围内。';
-      const deepseek = createMockDeepseek(longDeepText);
-      const result = await generateBridgeLLM(
-        { name: 'A', artist: 'B' },
-        { name: 'C', artist: 'D' },
-        deepseek,
-        { depth: 'deep' }
-      );
-      // Should succeed if under 300 chars
-      if (longDeepText.length <= 300) {
-        expect(result.source).toBe('llm');
-        expect(result.depth).toBe('deep');
-      }
-    });
-
-    it('falls back when deep mode text is too short (<20 chars)', async () => {
-      const deepseek = createMockDeepseek('太短了不够深度');
-      const result = await generateBridgeLLM(
-        { name: 'A', artist: 'B' },
-        { name: 'C', artist: 'D' },
-        deepseek,
-        { depth: 'deep' }
-      );
-      expect(result.source).toBe('template');
-      expect(result.depth).toBe('shallow');
-    });
-
-    it('falls back when deep mode text exceeds 300 chars', async () => {
-      const tooLong = '这是一段超长文字用来测试深度模式字数上限的验证逻辑，'.repeat(20); // ~460 chars
-      const deepseek = createMockDeepseek(tooLong);
-      const result = await generateBridgeLLM(
-        { name: 'A', artist: 'B' },
-        { name: 'C', artist: 'D' },
-        deepseek,
-        { depth: 'deep' }
-      );
-      expect(result.source).toBe('template');
-    });
-
-    it('auto mode defaults to shallow when expandContext blocks expansion', async () => {
-      const deepseek = createMockDeepseek('简短过渡');
-      const result = await generateBridgeLLM(
-        { name: 'A', artist: 'B' },
-        { name: 'C', artist: 'D' },
-        deepseek,
-        { expandContext: { consecutiveExpanded: 1 } }  // blocked
-      );
-      expect(result.depth).toBe('shallow');
-    });
-
-    it('auto mode defaults to shallow when no expandContext given', async () => {
-      // With no context, bridgesSinceLastExpand defaults to 0 → too_soon guard fires
-      const deepseek = createMockDeepseek('简短过渡文案');
-      const result = await generateBridgeLLM(
-        { name: 'A', artist: 'B' },
-        { name: 'C', artist: 'D' },
-        deepseek,
-        { depth: 'auto' }
-      );
-      // shouldExpand with default context: bridgesSinceLastExpand=0 < 2 → blocked
-      expect(result.depth).toBe('shallow');
-    });
-  });
-
-  // ═══ shouldExpand ═══
-
-  describe('shouldExpand()', () => {
-
-    it('blocks expansion when consecutiveExpanded >= 1', () => {
-      const result = shouldExpand({ consecutiveExpanded: 1, bridgesSinceLastExpand: 5 });
-      expect(result.shouldExpand).toBe(false);
-      expect(result.reason).toBe('consecutive_limit');
-    });
-
-    it('blocks expansion when bridgesSinceLastExpand < 2', () => {
-      const result = shouldExpand({ consecutiveExpanded: 0, bridgesSinceLastExpand: 1 });
-      expect(result.shouldExpand).toBe(false);
-      expect(result.reason).toBe('too_soon');
-    });
-
-    it('blocks when bridgesSinceLastExpand is 0', () => {
-      const result = shouldExpand({ consecutiveExpanded: 0, bridgesSinceLastExpand: 0 });
-      expect(result.shouldExpand).toBe(false);
-      expect(result.reason).toBe('too_soon');
-    });
-
-    it('allows expansion when guards pass (with seeded random)', () => {
-      // Use Math.random mock to force expansion
-      const originalRandom = Math.random;
-      Math.random = () => 0.1; // Always below base probability
-      try {
-        const result = shouldExpand({
-          consecutiveExpanded: 0,
-          bridgesSinceLastExpand: 3,
-          hour: 14,
-        });
-        expect(result.shouldExpand).toBe(true);
-        expect(result.reason).toBe('selected');
-        expect(result.probability).toBeGreaterThanOrEqual(0.25);
-      } finally {
-        Math.random = originalRandom;
-      }
-    });
-
-    it('does NOT expand when random exceeds probability', () => {
-      const originalRandom = Math.random;
-      Math.random = () => 0.99; // Always above probability
-      try {
-        const result = shouldExpand({
-          consecutiveExpanded: 0,
-          bridgesSinceLastExpand: 3,
-          hour: 14,
-        });
-        expect(result.shouldExpand).toBe(false);
-        expect(result.reason).toBe('probability');
-      } finally {
-        Math.random = originalRandom;
-      }
-    });
-
-    it('boosts probability for emotional/ambient next song', () => {
-      const originalRandom = Math.random;
-      Math.random = () => 0.99; // Block actual expansion
-      try {
-        const normalResult = shouldExpand({
-          consecutiveExpanded: 0,
-          bridgesSinceLastExpand: 3,
-          nextSong: { name: 'A', artist: 'B', tags: 'pop' },
-          hour: 14,
-        });
-        const emotionalResult = shouldExpand({
-          consecutiveExpanded: 0,
-          bridgesSinceLastExpand: 3,
-          nextSong: { name: 'A', artist: 'B', tags: 'ambient' },
-          hour: 14,
-        });
-        expect(emotionalResult.probability).toBeGreaterThan(normalResult.probability);
-      } finally {
-        Math.random = originalRandom;
-      }
-    });
-
-    it('boosts probability during late night hours', () => {
-      const originalRandom = Math.random;
-      Math.random = () => 0.99;
-      try {
-        const dayResult = shouldExpand({
-          consecutiveExpanded: 0, bridgesSinceLastExpand: 3, hour: 14,
-        });
-        const nightResult = shouldExpand({
-          consecutiveExpanded: 0, bridgesSinceLastExpand: 3, hour: 23,
-        });
-        expect(nightResult.probability).toBeGreaterThan(dayResult.probability);
-      } finally {
-        Math.random = originalRandom;
-      }
-    });
-
-    it('stacks emotional + night boosts', () => {
-      const originalRandom = Math.random;
-      Math.random = () => 0.99;
-      try {
-        const result = shouldExpand({
-          consecutiveExpanded: 0,
-          bridgesSinceLastExpand: 3,
-          nextSong: { tags: 'emotional' },
-          hour: 23,
-        });
-        // 0.25 base + 0.20 emotional + 0.15 night = 0.60
-        expect(result.probability).toBe(0.60);
-      } finally {
-        Math.random = originalRandom;
-      }
-    });
-
-    it('defaults hour to 12 (daytime) when not provided', () => {
-      const originalRandom = Math.random;
-      Math.random = () => 0.99;
-      try {
-        const result = shouldExpand({
-          consecutiveExpanded: 0, bridgesSinceLastExpand: 3,
-        });
-        // Base probability only: 0.25
-        expect(result.probability).toBe(0.25);
-      } finally {
-        Math.random = originalRandom;
-      }
     });
   });
 
@@ -1244,115 +954,80 @@ describe('Segment Engine', () => {
     });
   });
 
-  // ═══ shouldSilence (Phase 2) ═══
+  // ═══ fillMissingSegments ═══
 
-  describe('shouldSilence()', () => {
+  describe('fillMissingSegments()', () => {
 
-    it('returns silence for emotional previous track', () => {
-      const result = shouldSilence({
-        prevSong: { name: 'A', artist: 'B', tags: 'emotional' },
-        nextSong: { name: 'C', artist: 'D' },
-        consecutiveBridges: 0,
-        hour: 14,
-      });
-      expect(result.shouldSilence).toBe(true);
-      expect(result.reason).toBe('emotional_prev');
+    it('returns a Map with decisions for all gaps', () => {
+      const result = fillMissingSegments(5, []);
+      expect(result.size).toBe(4); // 5 tracks = 4 gaps
     });
 
-    it('returns silence for ambient previous track', () => {
-      const result = shouldSilence({
-        prevSong: { name: 'A', artist: 'B', tags: 'ambient' },
-        consecutiveBridges: 0,
-        hour: 14,
-      });
-      expect(result.shouldSilence).toBe(true);
-      expect(result.reason).toBe('emotional_prev');
+    it('preserves Brain explicit decisions', () => {
+      const brainSegments = [
+        { position: 'between_tracks', anchorTrackIndex: 0, type: 'silence', text: '' },
+        { position: 'between_tracks', anchorTrackIndex: 2, type: 'bridge', text: '自然过渡' },
+      ];
+      const result = fillMissingSegments(4, brainSegments);
+      expect(result.size).toBe(3); // 4 tracks = 3 gaps
+      expect(result.get(0).type).toBe('silence');
+      expect(result.get(2).type).toBe('bridge');
     });
 
-    it('can return silence during night hours (probabilistic)', () => {
-      let nightSilenceCount = 0;
-      for (let i = 0; i < 50; i++) {
-        const result = shouldSilence({
-          prevSong: { name: 'A', artist: 'B', tags: 'pop' },
-          consecutiveBridges: 0,
-          hour: 23,
-        });
-        if (result.shouldSilence && result.reason === 'night_mode') nightSilenceCount++;
+    it('marks filled gaps with _filled: true', () => {
+      const brainSegments = [
+        { position: 'between_tracks', anchorTrackIndex: 0, type: 'bridge' },
+      ];
+      const result = fillMissingSegments(3, brainSegments);
+      expect(result.get(0)._filled).toBeUndefined(); // Brain decision
+      expect(result.get(1)._filled).toBe(true); // Filled
+    });
+
+    it('returns empty Map for single track', () => {
+      const result = fillMissingSegments(1, []);
+      expect(result.size).toBe(0);
+    });
+
+    it('returns empty Map for zero tracks', () => {
+      const result = fillMissingSegments(0, []);
+      expect(result.size).toBe(0);
+    });
+
+    it('handles null brainSegments', () => {
+      const result = fillMissingSegments(3, null);
+      expect(result.size).toBe(2);
+    });
+
+    it('ignores non-between_tracks segments', () => {
+      const brainSegments = [
+        { position: 'before_track', anchorTrackIndex: 0, type: 'cold_open', text: '开场' },
+        { position: 'after_track', anchorTrackIndex: 1, type: 'back_announce', text: '回顾' },
+      ];
+      const result = fillMissingSegments(3, brainSegments);
+      expect(result.size).toBe(2);
+      expect(result.get(0)._filled).toBe(true);
+      expect(result.get(1)._filled).toBe(true);
+    });
+
+    it('filled gaps default to silence during night hours', () => {
+      const originalDate = global.Date;
+      const mockHour = 23; // 11pm
+      global.Date = class extends originalDate {
+        constructor(...args) {
+          if (args.length === 0) {
+            super(2026, 5, 14, mockHour, 0, 0);
+          } else {
+            super(...args);
+          }
+        }
+        static now() { return new originalDate(2026, 5, 14, mockHour, 0, 0).getTime(); }
+      };
+      try {
+        const result = fillMissingSegments(3, []);
+        expect(result.get(0).type).toBe('silence');
+      } finally {
+        global.Date = originalDate;
       }
-      // With 50% probability over 50 runs, expect 15-35 night_mode silences
-      expect(nightSilenceCount).toBeGreaterThan(10);
-      expect(nightSilenceCount).toBeLessThan(45);
-    });
-
-    it('can return silence during early morning (probabilistic)', () => {
-      let morningCount = 0;
-      for (let i = 0; i < 50; i++) {
-        const result = shouldSilence({
-          prevSong: { name: 'A', artist: 'B', tags: 'pop' },
-          consecutiveBridges: 0,
-          hour: 3,
-        });
-        if (result.shouldSilence && result.reason === 'night_mode') morningCount++;
-      }
-      expect(morningCount).toBeGreaterThan(10);
-      expect(morningCount).toBeLessThan(45);
-    });
-
-    it('returns silence after 3+ consecutive bridges', () => {
-      const result = shouldSilence({
-        prevSong: { name: 'A', artist: 'B', tags: 'pop' },
-        consecutiveBridges: 3,
-        hour: 14,
-      });
-      expect(result.shouldSilence).toBe(true);
-      expect(result.reason).toBe('bridge_fatigue');
-    });
-
-    it('does NOT trigger silence with < 3 consecutive bridges during daytime', () => {
-      const result = shouldSilence({
-        prevSong: { name: 'A', artist: 'B', tags: 'pop' },
-        consecutiveBridges: 2,
-        hour: 14,
-      });
-      expect(result.shouldSilence).toBe(false);
-    });
-
-    it('returns silence when next track is emotional', () => {
-      const result = shouldSilence({
-        prevSong: { name: 'A', artist: 'B', tags: 'pop' },
-        nextSong: { name: 'C', artist: 'D', tags: 'instrumental' },
-        consecutiveBridges: 0,
-        hour: 14,
-      });
-      expect(result.shouldSilence).toBe(true);
-      expect(result.reason).toBe('emotional_next');
-    });
-
-    it('returns silence when prev track has emotional mood', () => {
-      const result = shouldSilence({
-        prevSong: { name: 'A', artist: 'B', tags: '', mood: '治愈系' },
-        consecutiveBridges: 0,
-        hour: 14,
-      });
-      expect(result.shouldSilence).toBe(true);
-      expect(result.reason).toBe('emotional_prev');
-    });
-
-    it('no silence for normal pop tracks during daytime with few bridges', () => {
-      const result = shouldSilence({
-        prevSong: { name: 'A', artist: 'B', tags: 'pop' },
-        nextSong: { name: 'C', artist: 'D', tags: 'rock' },
-        consecutiveBridges: 1,
-        hour: 15,
-      });
-      expect(result.shouldSilence).toBe(false);
-      expect(result.reason).toBeNull();
-    });
-
-    it('handles missing context gracefully', () => {
-      const result = shouldSilence({});
-      // hour defaults to 12 (daytime), no emotional tags, 0 bridges
-      expect(result.shouldSilence).toBe(false);
     });
   });
 
@@ -1402,107 +1077,66 @@ describe('Segment Engine', () => {
 // ══════════════════════════════════════════════════════════════
 
 // Re-implement locally (avoid module deps)
-function normalizeBridgeOutput(rawText, depth, fallback) {
-  const isDeep = depth === 'deep';
-  const minLen = isDeep ? 20 : 5;
-  const maxLen = isDeep ? 300 : 120;
-
-  let cleaned = (rawText || '')
+function normalizeBridgeOutput(rawText, fallback) {
+  const cleaned = (rawText || '')
     .replace(/^["'"「『【《\s]+/, '')
     .replace(/["'"」』】》\s]+$/, '')
     .replace(/```[\s\S]*```/g, '')
     .replace(/^\d+[.、)\]]\s*/, '')
     .trim();
 
-  if (!cleaned || cleaned.length < minLen) {
-    return { text: fallback.text, source: 'template', depth: 'shallow', dedup: 'skipped' };
+  if (!cleaned) {
+    return { text: fallback.text, source: 'template', dedup: 'skipped' };
   }
 
-  if (cleaned.length > maxLen) {
-    const sentenceEnd = cleaned.lastIndexOf('。', maxLen);
-    if (sentenceEnd > minLen) {
-      cleaned = cleaned.slice(0, sentenceEnd + 1);
-    } else {
-      const commaEnd = cleaned.lastIndexOf('，', maxLen);
-      if (commaEnd > minLen) {
-        cleaned = cleaned.slice(0, commaEnd + 1);
-      } else {
-        return { text: fallback.text, source: 'template', depth: 'shallow', dedup: 'skipped' };
-      }
-    }
-  }
-
-  return { text: cleaned, source: 'llm', depth, dedup: 'passed' };
+  return { text: cleaned, source: 'llm', dedup: 'passed' };
 }
 
 describe('normalizeBridgeOutput()', () => {
   const fallback = { text: '模板fallback文本', source: 'template' };
 
   it('cleans leading/trailing quotes', () => {
-    const result = normalizeBridgeOutput('"这首歌的旋律真动人"', 'shallow', fallback);
+    const result = normalizeBridgeOutput('"这首歌的旋律真动人"', fallback);
     expect(result.text).toBe('这首歌的旋律真动人');
     expect(result.source).toBe('llm');
   });
 
   it('cleans Chinese quotes', () => {
-    const result = normalizeBridgeOutput('「从爵士到民谣的过渡」', 'shallow', fallback);
+    const result = normalizeBridgeOutput('「从爵士到民谣的过渡」', fallback);
     expect(result.text).toBe('从爵士到民谣的过渡');
   });
 
   it('strips numbering prefix', () => {
-    const result = normalizeBridgeOutput('1. 这首歌的贝斯线很特别', 'shallow', fallback);
+    const result = normalizeBridgeOutput('1. 这首歌的贝斯线很特别', fallback);
     expect(result.text).toBe('这首歌的贝斯线很特别');
   });
 
   it('strips markdown code blocks', () => {
-    const result = normalizeBridgeOutput('```一首歌的过渡```', 'shallow', fallback);
+    const result = normalizeBridgeOutput('```一首歌的过渡```', fallback);
     expect(result.text).toBe(fallback.text);
     expect(result.source).toBe('template');
   });
 
-  it('falls back for too-short output (shallow)', () => {
-    const result = normalizeBridgeOutput('短', 'shallow', fallback);
-    expect(result.source).toBe('template');
-  });
-
-  it('falls back for too-short output (deep)', () => {
-    const result = normalizeBridgeOutput('这段文字不够二十个字', 'deep', fallback);
-    expect(result.source).toBe('template');
-  });
-
-  it('accepts valid shallow output', () => {
-    const result = normalizeBridgeOutput('从周杰伦的安静到林俊杰的温柔，情绪在流动', 'shallow', fallback);
+  it('accepts any non-empty output', () => {
+    const result = normalizeBridgeOutput('短', fallback);
     expect(result.source).toBe('llm');
-    expect(result.depth).toBe('shallow');
+    expect(result.text).toBe('短');
   });
 
-  it('accepts valid deep output', () => {
-    const text = '这首歌的创作背景很有意思，据说歌手是在一次深夜独自开车时写下的旋律，那种孤独感透过每一个音符传递出来，让人觉得深夜的电台就是为自己开的。';
-    const result = normalizeBridgeOutput(text, 'deep', fallback);
+  it('accepts long output without truncation', () => {
+    const longText = '这是一段很长的文字描述歌曲的过渡和连接。' + '后面还有很多内容。'.repeat(50);
+    const result = normalizeBridgeOutput(longText, fallback);
     expect(result.source).toBe('llm');
-    expect(result.depth).toBe('deep');
-  });
-
-  it('truncates over-long output at sentence boundary', () => {
-    const longText = '这是一段很长的文字描述歌曲的过渡和连接。' + '后面还有很多内容需要被截断处理。'.repeat(20);
-    const result = normalizeBridgeOutput(longText, 'shallow', fallback);
-    expect(result.text.length).toBeLessThanOrEqual(121); // maxLen + 1 for period
-    expect(result.source).toBe('llm');
-  });
-
-  it('falls back when over-long with no sentence boundary', () => {
-    const longNoBreak = '这'.repeat(200);
-    const result = normalizeBridgeOutput(longNoBreak, 'shallow', fallback);
-    expect(result.source).toBe('template');
+    expect(result.text).toBe(longText.trim());
   });
 
   it('handles null input', () => {
-    const result = normalizeBridgeOutput(null, 'shallow', fallback);
+    const result = normalizeBridgeOutput(null, fallback);
     expect(result.source).toBe('template');
   });
 
   it('handles empty string input', () => {
-    const result = normalizeBridgeOutput('', 'shallow', fallback);
+    const result = normalizeBridgeOutput('', fallback);
     expect(result.source).toBe('template');
   });
 });
@@ -1586,66 +1220,6 @@ describe('charOverlap()', () => {
   it('handles empty strings', () => {
     expect(charOverlap('', 'test')).toBe(0);
     expect(charOverlap('test', '')).toBe(0);
-  });
-});
-
-// ══════════════════════════════════════════════════════════════
-// Enhanced shouldSilence() — Same Artist & Genre Tests
-// ══════════════════════════════════════════════════════════════
-
-describe('shouldSilence() — enhanced rules', () => {
-  // Re-use the existing local implementation from earlier in the file
-  // but test the new rules specifically
-
-  it('returns silence for same artist consecutive tracks', () => {
-    const result = shouldSilence({
-      prevSong: { name: 'Song A', artist: '周杰伦', tags: 'pop' },
-      nextSong: { name: 'Song B', artist: '周杰伦', tags: 'pop' },
-      consecutiveBridges: 0,
-      hour: 15,
-    });
-    expect(result.shouldSilence).toBe(true);
-    expect(result.reason).toBe('same_artist');
-  });
-
-  it('does not trigger same_artist for different artists', () => {
-    const result = shouldSilence({
-      prevSong: { name: 'Song A', artist: '周杰伦', tags: '' },
-      nextSong: { name: 'Song B', artist: '林俊杰', tags: '' },
-      consecutiveBridges: 0,
-      hour: 15,
-    });
-    // Should not be silence unless other rules trigger
-    // (At hour 15, not night, not emotional, no fatigue)
-    expect(result.reason).not.toBe('same_artist');
-  });
-
-  it('returns silence for emotional_prev regardless of artist', () => {
-    const result = shouldSilence({
-      prevSong: { name: 'Song', artist: 'Artist', tags: 'ambient' },
-      nextSong: { name: 'Next', artist: '周杰伦', tags: 'pop' },
-      consecutiveBridges: 0,
-      hour: 15,
-    });
-    expect(result.shouldSilence).toBe(true);
-    expect(result.reason).toBe('emotional_prev');
-  });
-
-  it('night silence probability is 0.5', () => {
-    // Run 100 times, expect roughly 50% silence
-    let silenceCount = 0;
-    for (let i = 0; i < 100; i++) {
-      const result = shouldSilence({
-        prevSong: { name: 'Song', artist: 'A', tags: '' },
-        nextSong: { name: 'Next', artist: 'B', tags: '' },
-        consecutiveBridges: 0,
-        hour: 23,
-      });
-      if (result.shouldSilence) silenceCount++;
-    }
-    // Should be roughly 50 (allow 30-70 range for randomness)
-    expect(silenceCount).toBeGreaterThan(25);
-    expect(silenceCount).toBeLessThan(75);
   });
 });
 

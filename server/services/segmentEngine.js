@@ -116,120 +116,85 @@ function normalizeSegments(rawSegments, tracks) {
 
 /**
  * Normalize and validate raw LLM bridge output.
- * Multi-step pipeline: clean → length check → dedup → fallback chain.
+ * Pipeline: clean → empty check → dedup → fallback chain.
+ * No length constraints — let the LLM decide how much to say.
  *
  * @param {string} rawText - Raw text from LLM
- * @param {'shallow'|'deep'} depth - Expected depth mode
  * @param {object} fallback - Template fallback result
- * @returns {{ text: string|null, source: string, depth: string, dedup: string }}
+ * @returns {{ text: string|null, source: string, dedup: string }}
  */
-function normalizeBridgeOutput(rawText, depth, fallback) {
-  const isDeep = depth === 'deep';
-  const minLen = isDeep ? 20 : 5;
-  const maxLen = isDeep ? 300 : 120;
-
+function normalizeBridgeOutput(rawText, fallback) {
   // Step 1: Clean — strip quotes, whitespace, markdown artifacts
-  let cleaned = (rawText || '')
+  const cleaned = (rawText || '')
     .replace(/^["'"「『【《\s]+/, '')
     .replace(/["'"」』】》\s]+$/, '')
     .replace(/```[\s\S]*```/g, '')  // Remove markdown code blocks
     .replace(/^\d+[.、)\]]\s*/, '') // Remove numbering prefixes
     .trim();
 
-  // Step 2: Length validation
-  if (!cleaned || cleaned.length < minLen) {
-    logger.warn('SEGMENT', `Bridge (${depth}) too short: ${cleaned.length} < ${minLen} chars, falling back`);
-    return { text: fallback.text, source: 'template', depth: 'shallow', dedup: 'skipped' };
+  // Step 2: Empty check — only reject truly empty/gibberish output
+  if (!cleaned) {
+    logger.warn('SEGMENT', 'Bridge output empty after cleaning, falling back');
+    return { text: fallback.text, source: 'template', dedup: 'skipped' };
   }
 
-  // Step 3: Truncate if slightly over (graceful degradation)
-  if (cleaned.length > maxLen) {
-    // Try truncating at last sentence boundary
-    const sentenceEnd = cleaned.lastIndexOf('。', maxLen);
-    if (sentenceEnd > minLen) {
-      cleaned = cleaned.slice(0, sentenceEnd + 1);
-    } else {
-      // Try comma boundary
-      const commaEnd = cleaned.lastIndexOf('，', maxLen);
-      if (commaEnd > minLen) {
-        cleaned = cleaned.slice(0, commaEnd + 1);
-      } else {
-        logger.warn('SEGMENT', `Bridge (${depth}) too long: ${cleaned.length} > ${maxLen} chars, falling back`);
-        return { text: fallback.text, source: 'template', depth: 'shallow', dedup: 'skipped' };
-      }
-    }
-  }
-
-  // Step 4: Dedup check against recent bridge history
+  // Step 3: Dedup check against recent bridge history
   const dedupResult = checkBridgeDedup(cleaned);
   if (!dedupResult.allowed) {
     logger.info('SEGMENT', `Bridge dedup blocked: ${dedupResult.reason}`);
-    // For dedup failures, use template (it's random enough to avoid repeats)
-    return { text: fallback.text, source: 'template', depth: 'shallow', dedup: dedupResult.reason };
+    return { text: fallback.text, source: 'template', dedup: dedupResult.reason };
   }
 
-  return { text: cleaned, source: 'llm', depth, dedup: 'passed' };
+  return { text: cleaned, source: 'llm', dedup: 'passed' };
 }
 
 /**
  * Generate a bridge segment between two songs using LLM (DeepSeek rawChat).
- * Supports two modes:
- *   - shallow: brief one-sentence transition (default, ~75% of bridges)
- *   - deep: expanded 2-4 sentence commentary with personal angle (~25%)
+ * LLM decides text length freely — no depth parameter.
  *
- * Enriched with persona, time context, play history, and user taste.
  * Falls back to template-based generateBridgeText() on any failure.
  *
  * @param {object} prevSong - { name, artist, tags? }
  * @param {object} nextSong - { name, artist, tags? }
  * @param {object} deepseek - DeepSeekAdapter instance (must have rawChat)
- * @param {object} [options] - { temperature, maxTokens, timeout, depth, expandContext, bridgeContext }
- * @returns {Promise<{ text, transitionStyle, source, depth }>}
+ * @param {object} [options] - { temperature, maxTokens, timeout, bridgeContext }
+ * @returns {Promise<{ text, transitionStyle, source }>}
  */
 async function generateBridgeLLM(prevSong, nextSong, deepseek, options = {}) {
   const fallback = generateBridgeText(prevSong, nextSong);
 
   // Guard: if deepseek is not provided or rawChat is missing, fall back
   if (!deepseek || typeof deepseek.rawChat !== 'function') {
-    return { ...fallback, source: 'template', depth: 'shallow' };
+    return { ...fallback, source: 'template' };
   }
-
-  // Determine depth
-  let depth = options.depth || 'auto';
-  if (depth === 'auto') {
-    const expandResult = shouldExpand(options.expandContext || {});
-    depth = expandResult.shouldExpand ? 'deep' : 'shallow';
-  }
-
-  const isDeep = depth === 'deep';
 
   // Build prompts using dedicated builder (lean context: persona + time + recent plays + song pair)
   const bridgeContext = options.bridgeContext || null;
   const { systemPrompt, userPrompt } = promptBuilders.buildBridgePrompt(
-    prevSong, nextSong, depth, bridgeContext
+    prevSong, nextSong, bridgeContext
   );
 
   const rawOptions = {
-    temperature: options.temperature ?? (isDeep ? 0.85 : 0.9),
-    maxTokens: options.maxTokens ?? (isDeep ? 250 : 100),
-    timeout: options.timeout ?? (isDeep ? 18000 : 12000),
+    temperature: options.temperature ?? 0.85,
+    maxTokens: options.maxTokens ?? 200,
+    timeout: options.timeout ?? 15000,
   };
 
   try {
     const rawText = await deepseek.rawChat(systemPrompt, userPrompt, rawOptions);
 
     // Normalize output through validation pipeline
-    const result = normalizeBridgeOutput(rawText, depth, fallback);
+    const result = normalizeBridgeOutput(rawText, fallback);
 
     // Record in history for future dedup checks
     if (result.source === 'llm') {
       recordBridgeText(result.text);
     }
 
-    return { text: result.text, transitionStyle: 'outro', source: result.source, depth: result.depth };
+    return { text: result.text, transitionStyle: 'outro', source: result.source };
   } catch (err) {
-    logger.warn('SEGMENT', `LLM bridge (${depth}) failed: ${err.message}, falling back to template`);
-    return { ...fallback, source: 'template', depth: 'shallow' };
+    logger.warn('SEGMENT', `LLM bridge failed: ${err.message}, falling back to template`);
+    return { ...fallback, source: 'template' };
   }
 }
 
@@ -434,150 +399,45 @@ function generateBackAnnounce(song, options = {}) {
   };
 }
 
-// ── Silence Detection ─────────────────────────────────────────
-
-const SILENCE_CONFIG = {
-  nightHoursStart: 23,           // 深夜开始：23:00
-  nightHoursEnd: 6,              // 深夜结束：06:00
-  nightSilenceProbability: 0.5,  // 深夜 50% 概率插入 silence (increased from 0.4)
-  consecutiveBridgeLimit: 3,     // 连续 3 个 bridge 后强制 silence
-  sameArtistBoost: 0.3,          // +30% silence if prev and next are same artist
-  sameGenreBoost: 0.15,          // +15% silence if both tracks share genre tags
-  emotionalTags: new Set([
-    'emotional', 'ambient', 'instrumental', 'classical',
-    'post-rock', 'shoegaze', 'dream pop', '冥想', '纯音乐',
-    '新世纪', '氛围', '后摇', '治愈',
-  ]),
-  // Genre tags for "same genre" detection
-  genreTags: new Set([
-    'rock', 'pop', 'jazz', 'electronic', 'hip-hop', 'r&b', 'folk',
-    'indie', 'punk', 'metal', 'blues', 'country', 'reggae',
-    '摇滚', '流行', '爵士', '电子', '民谣', '嘻哈',
-  ]),
-};
+// ── Missing Segment Fallback ─────────────────────────────────
 
 /**
- * Decide whether a silence segment should be inserted at this position.
+ * Fill missing rhythm decisions when Brain doesn't output complete segments.
+ * Deterministic fallback: night → silence, daytime → bridge.
+ * No LLM calls, no randomness.
  *
- * Rules (in priority order):
- * 1. Emotional/ambient previous track → silence lets the mood breathe
- * 2. Same artist consecutive → let the music speak, avoid DJ over-talking
- * 3. Late night → reduce DJ chatter (probabilistic)
- * 4. Bridge fatigue → too many bridges in a row
- * 5. Same genre pair → genre flow is better without interruption
- * 6. Emotional next track → silence as a gentle lead-in
- *
- * @param {object} context
- * @param {object} context.prevSong - { name, artist, tags? }
- * @param {object} [context.nextSong] - { name, artist, tags? }
- * @param {number} context.consecutiveBridges - How many bridges in a row so far
- * @param {number} [context.hour] - Current hour (0-23), defaults to Date.now()
- * @returns {{ shouldSilence: boolean, reason: string|null }}
+ * @param {number} trackCount - Number of tracks in the batch
+ * @param {Array} brainSegments - Normalized segments from Brain
+ * @returns {Map<number, object>} Gap index → segment decision
  */
-function shouldSilence(context = {}) {
-  const { prevSong, nextSong, consecutiveBridges = 0 } = context;
-  const hour = typeof context.hour === 'number' ? context.hour : new Date().getHours();
+function fillMissingSegments(trackCount, brainSegments) {
+  const decisions = new Map();
 
-  const prevTags = ((prevSong?.tags || '') + ' ' + (prevSong?.mood || '')).toLowerCase();
-  const nextTags = ((nextSong?.tags || '') + ' ' + (nextSong?.mood || '')).toLowerCase();
-
-  // Rule 1: Emotional/ambient previous track → silence lets the mood breathe
-  const prevIsEmotional = [...SILENCE_CONFIG.emotionalTags].some(t => prevTags.includes(t));
-  if (prevIsEmotional) {
-    return { shouldSilence: true, reason: 'emotional_prev' };
-  }
-
-  // Rule 2: Same artist consecutive → let the music speak
-  const prevArtist = (prevSong?.artist || '').toLowerCase().trim();
-  const nextArtist = (nextSong?.artist || '').toLowerCase().trim();
-  if (prevArtist && nextArtist && prevArtist === nextArtist) {
-    return { shouldSilence: true, reason: 'same_artist' };
-  }
-
-  // Rule 3: Late night — reduce DJ chatter with increased probability
-  const isNight = hour >= SILENCE_CONFIG.nightHoursStart || hour < SILENCE_CONFIG.nightHoursEnd;
-  if (isNight && Math.random() < SILENCE_CONFIG.nightSilenceProbability) {
-    return { shouldSilence: true, reason: 'night_mode' };
-  }
-
-  // Rule 4: Too many consecutive bridges — forced breather
-  if (consecutiveBridges >= SILENCE_CONFIG.consecutiveBridgeLimit) {
-    return { shouldSilence: true, reason: 'bridge_fatigue' };
-  }
-
-  // Rule 5: Same genre pair → genre flow is better uninterrupted
-  if (prevTags && nextTags) {
-    const sharedGenres = [...SILENCE_CONFIG.genreTags].filter(t => prevTags.includes(t) && nextTags.includes(t));
-    if (sharedGenres.length > 0 && Math.random() < SILENCE_CONFIG.sameGenreBoost) {
-      return { shouldSilence: true, reason: `same_genre (${sharedGenres[0]})` };
+  // First, collect Brain's explicit between_tracks decisions
+  for (const seg of (brainSegments || [])) {
+    if (seg.position === 'between_tracks' && typeof seg.anchorTrackIndex === 'number') {
+      decisions.set(seg.anchorTrackIndex, seg);
     }
   }
 
-  // Rule 6: Next track is emotional → silence as a gentle lead-in
-  const nextIsEmotional = [...SILENCE_CONFIG.emotionalTags].some(t => nextTags.includes(t));
-  if (nextIsEmotional) {
-    return { shouldSilence: true, reason: 'emotional_next' };
+  // For missing gaps, use deterministic time-of-day rule
+  const hour = new Date().getHours();
+  const isNight = hour >= 23 || hour < 6;
+  const defaultType = isNight ? 'silence' : 'bridge';
+
+  for (let i = 0; i < trackCount - 1; i++) {
+    if (!decisions.has(i)) {
+      decisions.set(i, {
+        type: defaultType,
+        anchorTrackIndex: i,
+        position: 'between_tracks',
+        text: '',
+        _filled: true, // Mark as fallback for logging
+      });
+    }
   }
 
-  return { shouldSilence: false, reason: null };
-}
-
-// ── Expansion Scoring ─────────────────────────────────────────
-
-const EXPAND_CONFIG = {
-  baseProbability: 0.25,            // ~25% base chance of expansion
-  emotionalBoost: 0.20,             // +20% for emotional/ambient/classical tags
-  nightBoost: 0.15,                 // +15% during late night hours (22:00-05:00)
-  consecutiveExpandedLimit: 1,      // Never expand 2 bridges in a row
-  minGapBetweenExpansions: 2,       // At least 2 normal bridges between expansions
-};
-
-/**
- * Decide whether this bridge should be an "expanded" deep commentary.
- * Target: ~20-30% of bridges get expanded, with guards against consecutive expansions.
- *
- * @param {object} context
- * @param {object} [context.nextSong] - { name, artist, tags?, mood? }
- * @param {number} [context.consecutiveExpanded] - How many expanded bridges in a row (0 or 1)
- * @param {number} [context.bridgesSinceLastExpand] - Normal bridges since last expansion
- * @param {number} [context.hour] - Current hour (0-23)
- * @returns {{ shouldExpand: boolean, probability: number, reason: string }}
- */
-function shouldExpand(context = {}) {
-  const { consecutiveExpanded = 0, bridgesSinceLastExpand = 0 } = context;
-  const hour = typeof context.hour === 'number' ? context.hour : new Date().getHours();
-
-  // Hard guard: never expand 2 in a row
-  if (consecutiveExpanded >= EXPAND_CONFIG.consecutiveExpandedLimit) {
-    return { shouldExpand: false, probability: 0, reason: 'consecutive_limit' };
-  }
-
-  // Hard guard: need breathing room after last expansion
-  if (bridgesSinceLastExpand < EXPAND_CONFIG.minGapBetweenExpansions) {
-    return { shouldExpand: false, probability: 0, reason: 'too_soon' };
-  }
-
-  // Calculate probability
-  let probability = EXPAND_CONFIG.baseProbability;
-
-  // Boost for emotional/ambient songs
-  const nextTags = ((context.nextSong?.tags || '') + ' ' + (context.nextSong?.mood || '')).toLowerCase();
-  if (SILENCE_CONFIG.emotionalTags.some(t => nextTags.includes(t))) {
-    probability += EXPAND_CONFIG.emotionalBoost;
-  }
-
-  // Boost for late night hours (more intimate, more room for depth)
-  const isLateNight = hour >= 22 || hour < 5;
-  if (isLateNight) {
-    probability += EXPAND_CONFIG.nightBoost;
-  }
-
-  const expand = Math.random() < probability;
-  return {
-    shouldExpand: expand,
-    probability: Math.round(probability * 100) / 100,
-    reason: expand ? 'selected' : 'probability',
-  };
+  return decisions;
 }
 
 // ── Shared Helpers ────────────────────────────────────────────
@@ -780,8 +640,7 @@ module.exports = {
   generateBridgeLLM,
   generateColdOpen,
   generateBackAnnounce,
-  shouldSilence,
-  shouldExpand,
+  fillMissingSegments,
   resolveSegmentTTS,
   dedupCheck,
   dedupFilter,
@@ -794,7 +653,5 @@ module.exports = {
   recordBridgeText,
   VALID_TYPES,
   VALID_POSITIONS,
-  SILENCE_CONFIG,
-  EXPAND_CONFIG,
   COLD_OPEN_PARTS,
 };

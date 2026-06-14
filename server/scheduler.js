@@ -1,6 +1,6 @@
 // scheduler.js — FlowState Radio's Rhythm Scheduler (cron-based)
 // 3 scheduled tasks: daily plan (07:00), morning briefing (09:00), hourly check
-// Plus: rolling queue pre-fetch + filler transition system
+// Plus: rolling queue pre-fetch + LLM-driven segment generation
 
 const cron = require('node-cron');
 const context = require('./context');
@@ -8,7 +8,6 @@ const Brain = require('./brain');
 const state = require('./state');
 const ncm = require('./services/ncm');
 const tts = require('./tts');
-const filler = require('./services/filler');
 const segmentEngine = require('./services/segmentEngine');
 const jobQueue = require('./services/jobQueue');
 const personaLoader = require('./services/personaLoader');
@@ -18,16 +17,13 @@ const logger = require('./utils/logger');
 // ── Rolling Queue Config ──────────────────────────────────────
 const PREFETCH_THRESHOLD = 2;  // Trigger refill when ≤ this many songs left
 const PREFETCH_COUNT = 10;     // Request this many songs per refill
-const FILLER_STRETCH_LIMIT = 3; // Insert filler DJ talk after this many consecutive plays without DJ
 
 class Scheduler {
   constructor() {
     this.brain = new Brain(config);
     this.broadcast = null; // Set after server starts
     this.tasks = [];
-    this._consecutivePlays = 0;    // Tracks songs played without DJ talk
     this._prefetching = false;     // Prevent concurrent prefetch requests
-    this._lastWeather = null;      // Cache for weather-based fillers
     this._refillBatch = 0;         // Counter for unique bridge segment keys
   }
 
@@ -280,15 +276,6 @@ class Scheduler {
       return;
     }
 
-    // Weather-based filler: update cached weather for filler generation
-    try {
-      const ctx = await context.assemble({ triggerType: 'hourly-weather' });
-      if (ctx.environment) {
-        const weatherMatch = ctx.environment.match(/天气[:：]\s*(.+?)(?:\n|$)/);
-        if (weatherMatch) this.setWeather(weatherMatch[1]);
-      }
-    } catch (_) { /* ignore */ }
-
     // Check if it's a transition time (style change)
     const hour = new Date().getHours();
     const isTransition = [9, 12, 18, 22].includes(hour);
@@ -480,78 +467,6 @@ class Scheduler {
     } finally {
       this._prefetching = false;
     }
-  }
-
-  // ── Filler / Transition System ──────────────────────────────
-
-  /**
-   * Check if a filler DJ talk should be inserted between songs
-   * Called by chat.js or the playback pipeline before each song transition
-   * @param {object} [prevSong] - { name, artist } of the song just finished
-   * @param {object} [nextSong] - { name, artist } of the upcoming song
-   * @param {object} [options] - { silent: boolean } — if true, suppress dj-talk broadcast
-   * @returns {Promise<{ text: string, ttsUrl: string|null }|null>}
-   */
-  async generateTransition(prevSong, nextSong, options = {}) {
-    const { silent = false } = options;
-    this._consecutivePlays++;
-
-    // Decide filler reason
-    let reason = 'gap';
-    if (this._consecutivePlays >= FILLER_STRETCH_LIMIT) {
-      reason = 'stretch';
-      this._consecutivePlays = 0; // Reset counter
-    } else if (prevSong && nextSong) {
-      // Check for style transition (different tags/genre)
-      reason = 'transition';
-    }
-
-    const fillerResult = filler.generateFiller({
-      reason,
-      weather: this._lastWeather,
-      prevSong: prevSong?.name,
-      prevArtist: prevSong?.artist,
-    });
-
-    // Try to synthesize TTS for the filler
-    let ttsUrl = null;
-    try {
-      const ttsResult = await tts.synthesize(fillerResult.text);
-      ttsUrl = ttsResult.url;
-    } catch (err) {
-      logger.warn('SCHEDULER', `Filler TTS failed: ${err.message}`);
-    }
-
-    // Log and broadcast (unless silent mode — caller will embed TTS into now-playing)
-    state.logMessage('flowstate', fillerResult.text);
-
-    if (!silent && this.broadcast) {
-      this.broadcast({
-        type: 'dj-talk',
-        data: {
-          text: fillerResult.text,
-          ttsUrl,
-          fillerType: fillerResult.type,
-        },
-      });
-    }
-
-    logger.info('SCHEDULER', `Filler (${fillerResult.type}): "${fillerResult.text}"`);
-    return { text: fillerResult.text, ttsUrl, type: fillerResult.type };
-  }
-
-  /**
-   * Reset the consecutive play counter (called when DJ talks naturally)
-   */
-  resetPlayCounter() {
-    this._consecutivePlays = 0;
-  }
-
-  /**
-   * Update cached weather for filler generation
-   */
-  setWeather(weatherDesc) {
-    this._lastWeather = weatherDesc;
   }
 
   /**

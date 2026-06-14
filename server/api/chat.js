@@ -12,7 +12,6 @@ const config = require('../config');
 const logger = require('../utils/logger');
 const tts = require('../tts');
 const scheduler = require('../scheduler');
-const filler = require('../services/filler');
 const segmentEngine = require('../services/segmentEngine');
 const jobQueue = require('../services/jobQueue');
 const personaLoader = require('../services/personaLoader');
@@ -71,11 +70,6 @@ router.post('/', async (req, res) => {
       }
 
       case 'skip': {
-        // Before skipping: check if we should insert a filler DJ talk
-        const currentMeta = state.getCurrentState().now_playing_track_id
-          ? state.getTrackMeta(state.getCurrentState().now_playing_track_id) : null;
-        const prevSong = currentMeta ? { name: currentMeta.track_name, artist: currentMeta.artist } : null;
-
         const next = state.shiftQueue();
         if (next) {
           const url = await safeGetSongUrl(next.track_id);
@@ -86,9 +80,7 @@ router.post('/', async (req, res) => {
               const fallbackUrl = await safeGetSongUrl(fallback.track_id);
               if (fallbackUrl) {
                 const fallbackMeta = state.getTrackMeta(fallback.track_id);
-                const nextSong = { name: fallbackMeta?.track_name || fallback.track_name, artist: fallbackMeta?.artist || fallback.artist };
-
-                // Check segments first, then fall back to filler
+                // Check for pre-generated bridge segment
                 const fbSegs = state.getAllSegments();
                 let fbTransitionSeg = null;
                 let fbSegKey = null;
@@ -101,9 +93,6 @@ router.post('/', async (req, res) => {
                 }
                 if (fbTransitionSeg) {
                   state.removeSegment(fbSegKey);
-                }
-                if (!fbTransitionSeg && filler.shouldInsertFiller(scheduler._consecutivePlays)) {
-                  scheduler.generateTransition(prevSong, nextSong).catch(() => {});
                 }
 
                 state.updateCurrentState({
@@ -150,16 +139,14 @@ router.post('/', async (req, res) => {
           }
 
           const meta = state.getTrackMeta(next.track_id);
-          const nextSong = { name: meta?.track_name || next.track_name, artist: meta?.artist || next.artist };
 
-          // ── Segment / Filler Transition Logic ─────────────────
+          // ── Segment Transition Logic ─────────────────────────
           const allSegs = state.getAllSegments();
           const hasSegments = allSegs.length > 0;
           let transitionSeg = null;
           let consumedSegKey = null;
 
           if (hasSegments) {
-            // Prefer pre-generated bridge segment over ad-hoc filler
             const bridgeSegs = allSegs.filter(s => s.type === 'bridge' && s.ttsStatus === 'ready');
             if (bridgeSegs.length > 0) {
               transitionSeg = bridgeSegs[0];
@@ -169,10 +156,6 @@ router.post('/', async (req, res) => {
 
           if (transitionSeg) {
             state.removeSegment(consumedSegKey);
-          }
-
-          if (!transitionSeg && filler.shouldInsertFiller(scheduler._consecutivePlays)) {
-            scheduler.generateTransition(prevSong, nextSong).catch(() => {});
           }
 
           state.updateCurrentState({
@@ -641,8 +624,6 @@ router.post('/', async (req, res) => {
 
                 // Push DJ talk first if AI has something to say (with TTS)
                 if (aiResult.say) {
-                  // AI is talking — reset the filler counter
-                  scheduler.resetPlayCounter();
                   try {
                     const ttsResult = await tts.synthesize(aiResult.say);
                     broadcast({

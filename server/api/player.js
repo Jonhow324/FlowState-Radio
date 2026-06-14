@@ -9,7 +9,6 @@ const router = express.Router();
 const state = require('../state');
 const ncm = require('../services/ncm');
 const scheduler = require('../scheduler');
-const filler = require('../services/filler');
 const logger = require('../utils/logger');
 const jobQueue = require('../services/jobQueue');
 
@@ -88,15 +87,6 @@ router.post('/play', async (req, res) => {
     }
 
     // Play next from queue
-    // Capture previous song info before shifting
-    const prevForQueueNext = current.now_playing_track_id
-      ? {
-          name: state.getTrackMeta(current.now_playing_track_id)?.track_name || 'Unknown',
-          artist: state.getTrackMeta(current.now_playing_track_id)?.artist || 'Unknown',
-          trackId: current.now_playing_track_id,
-        }
-      : null;
-
     const next = state.shiftQueue();
     if (next) {
       let url;
@@ -113,11 +103,11 @@ router.post('/play', async (req, res) => {
         artist: meta?.artist || next.artist,
       };
 
-      // ── Segment / Filler Transition Logic ────────────────────
+      // ── Segment Transition Logic ─────────────────────────────
       let transitionStyle = next.transitionStyle || meta?.transitionStyle || 'outro';
       let fillerData = null;
 
-      // Check for pre-generated bridge segment first
+      // Check for pre-generated bridge segment
       const queueSegs = state.getAllSegments();
       let queueBridgeSeg = null;
       if (queueSegs.length > 0) {
@@ -128,18 +118,8 @@ router.post('/play', async (req, res) => {
         state.removeSegment(`${queueBridgeSeg.position}:${queueBridgeSeg.anchorTrackIndex}`);
         fillerData = { text: queueBridgeSeg.text, ttsUrl: queueBridgeSeg.ttsUrl, type: 'bridge' };
         transitionStyle = queueBridgeSeg.transitionStyle || 'intro';
-      } else if (filler.shouldInsertFiller(scheduler._consecutivePlays)) {
-        try {
-          fillerData = await scheduler.generateTransition(prevForQueueNext, nextSongInfo, { silent: true });
-          if (fillerData?.ttsUrl) {
-            transitionStyle = 'intro';
-          }
-        } catch (err) {
-          logger.warn('PLAYER', `Filler generation failed: ${err.message}`);
-        }
-      } else {
-        scheduler._consecutivePlays++;
       }
+      // No segment available → silent transition (natural song-to-song flow)
 
       state.updateCurrentState({
         now_playing_track_id: next.track_id,
@@ -211,16 +191,6 @@ router.post('/skip', async (req, res) => {
   const broadcast = req.app.get('broadcast');
 
   try {
-    // Capture previous song info before shifting
-    const currentState = state.getCurrentState();
-    const prevSong = currentState.now_playing_track_id
-      ? {
-          name: state.getTrackMeta(currentState.now_playing_track_id)?.track_name || 'Unknown',
-          artist: state.getTrackMeta(currentState.now_playing_track_id)?.artist || 'Unknown',
-          trackId: currentState.now_playing_track_id,
-        }
-      : null;
-
     const next = state.shiftQueue();
 
     if (next) {
@@ -240,11 +210,11 @@ router.post('/skip', async (req, res) => {
         artist: meta?.artist || next.artist,
       };
 
-      // ── Segment / Filler Transition Logic ────────────────────
+      // ── Segment Transition Logic ─────────────────────────────
       let transitionStyle = next.transitionStyle || meta?.transitionStyle || 'outro';
       let fillerData = null;
 
-      // Check for pre-generated bridge segment first
+      // Check for pre-generated bridge segment
       const allSegs = state.getAllSegments();
       let bridgeSeg = null;
       if (allSegs.length > 0) {
@@ -256,19 +226,8 @@ router.post('/skip', async (req, res) => {
         state.removeSegment(`${bridgeSeg.position}:${bridgeSeg.anchorTrackIndex}`);
         fillerData = { text: bridgeSeg.text, ttsUrl: bridgeSeg.ttsUrl, type: 'bridge' };
         transitionStyle = bridgeSeg.transitionStyle || 'intro';
-      } else if (filler.shouldInsertFiller(scheduler._consecutivePlays)) {
-        // Fall back to ad-hoc filler generation
-        try {
-          fillerData = await scheduler.generateTransition(prevSong, nextSongInfo, { silent: true });
-          if (fillerData?.ttsUrl) {
-            transitionStyle = 'intro';
-          }
-        } catch (err) {
-          logger.warn('PLAYER', `Filler generation failed: ${err.message}`);
-        }
-      } else {
-        scheduler._consecutivePlays++;
       }
+      // No segment available → silent transition (natural song-to-song flow)
 
       state.updateCurrentState({
         now_playing_track_id: next.track_id,

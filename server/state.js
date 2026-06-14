@@ -483,7 +483,7 @@ function updateCurrentState(partial) {
 
 // ===== Segment Storage (in-memory) =====
 // Segments are transient broadcast data — not persisted to SQLite.
-// Keyed by "position:anchorIndex" for O(1) lookup during playback.
+// Keyed by "position:afterTrackIndex" (or beforeTrackIndex for before_track) for O(1) lookup during playback.
 
 const _segmentMap = new Map();
 

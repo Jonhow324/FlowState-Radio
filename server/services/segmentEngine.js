@@ -41,7 +41,8 @@ function normalizeSegments(rawSegments, tracks) {
         id: `seg:immediate:${i}`,
         type: VALID_TYPES.has(s.type) ? s.type : 'quick_touch',
         position: 'before_track',
-        anchorTrackIndex: -1,
+        afterTrackIndex: null,
+        beforeTrackIndex: null,
         text: (s.text || '').trim(),
         ttsUrl: null,
         ttsStatus: 'pending',
@@ -72,6 +73,25 @@ function normalizeSegments(rawSegments, tracks) {
     let anchor = typeof raw.anchor === 'number' ? raw.anchor : i;
     anchor = Math.max(0, Math.min(anchor, maxIndex));
 
+    // Dual indexing — afterTrackIndex (prev track) + beforeTrackIndex (next track)
+    let afterTrackIndex = null;
+    let beforeTrackIndex = null;
+    switch (position) {
+      case 'between_tracks':
+        afterTrackIndex = anchor;
+        beforeTrackIndex = anchor + 1 <= maxIndex ? anchor + 1 : null;
+        break;
+      case 'after_track':
+        afterTrackIndex = anchor;
+        break;
+      case 'before_track':
+        beforeTrackIndex = anchor;
+        break;
+      default:
+        afterTrackIndex = anchor;
+        break;
+    }
+
     // Text
     const text = (raw.text || '').trim();
 
@@ -83,24 +103,19 @@ function normalizeSegments(rawSegments, tracks) {
 
     // Build metadata from adjacent tracks
     const metadata = {};
-    if (position === 'between_tracks' || position === 'after_track') {
-      const prevIdx = Math.max(0, anchor - (position === 'between_tracks' ? 0 : 0));
-      if (tracks[prevIdx]) {
-        metadata.prevSong = { name: tracks[prevIdx].name || tracks[prevIdx].trackName, artist: tracks[prevIdx].artist };
-      }
+    if (afterTrackIndex !== null && tracks[afterTrackIndex]) {
+      metadata.prevSong = { name: tracks[afterTrackIndex].name || tracks[afterTrackIndex].trackName, artist: tracks[afterTrackIndex].artist };
     }
-    if (position === 'between_tracks' || position === 'before_track') {
-      const nextIdx = position === 'between_tracks' ? anchor + 1 : anchor;
-      if (tracks[nextIdx]) {
-        metadata.nextSong = { name: tracks[nextIdx].name || tracks[nextIdx].trackName, artist: tracks[nextIdx].artist };
-      }
+    if (beforeTrackIndex !== null && tracks[beforeTrackIndex]) {
+      metadata.nextSong = { name: tracks[beforeTrackIndex].name || tracks[beforeTrackIndex].trackName, artist: tracks[beforeTrackIndex].artist };
     }
 
     results.push({
-      id: `seg:${type}:${anchor}:${i}`,
+      id: `seg:${type}:${afterTrackIndex ?? beforeTrackIndex}:${i}`,
       type,
       position,
-      anchorTrackIndex: anchor,
+      afterTrackIndex,
+      beforeTrackIndex,
       text,
       ttsUrl: null,
       ttsStatus,
@@ -422,8 +437,13 @@ function fillMissingSegments(trackCount, brainSegments) {
 
   // First, collect Brain's explicit between_tracks decisions
   for (const seg of (brainSegments || [])) {
-    if (seg.position === 'between_tracks' && typeof seg.anchorTrackIndex === 'number') {
-      decisions.set(seg.anchorTrackIndex, seg);
+    if (seg.position === 'between_tracks') {
+      const gapIndex = typeof seg.afterTrackIndex === 'number'
+        ? seg.afterTrackIndex
+        : (typeof seg.anchorTrackIndex === 'number' ? seg.anchorTrackIndex : null);
+      if (gapIndex !== null) {
+        decisions.set(gapIndex, seg);
+      }
     }
   }
 
@@ -436,7 +456,8 @@ function fillMissingSegments(trackCount, brainSegments) {
     if (!decisions.has(i)) {
       decisions.set(i, {
         type: defaultType,
-        anchorTrackIndex: i,
+        afterTrackIndex: i,
+        beforeTrackIndex: i + 1,
         position: 'between_tracks',
         text: '',
         _filled: true, // Mark as fallback for logging
@@ -468,7 +489,8 @@ function buildBackAnnounceSegment(song, anchorIndex, idPrefix = 'back') {
     id: `seg:back_announce:${idPrefix}:${anchorIndex}`,
     type: 'back_announce',
     position: 'after_track',
-    anchorTrackIndex: anchorIndex,
+    afterTrackIndex: anchorIndex,
+    beforeTrackIndex: null,
     text: info.text,
     ttsUrl: null,
     ttsStatus: 'pending',
@@ -484,12 +506,13 @@ function buildBackAnnounceSegment(song, anchorIndex, idPrefix = 'back') {
  * @param {string} [idPrefix='silence'] - ID prefix for uniqueness
  * @returns {object} Segment
  */
-function buildSilenceSegment(anchorIndex, reason, idPrefix = 'silence') {
+function buildSilenceSegment(anchorIndex, reason, idPrefix = 'silence', nextIndex = null) {
   return {
     id: `seg:silence:${idPrefix}:${anchorIndex}`,
     type: 'silence',
     position: 'between_tracks',
-    anchorTrackIndex: anchorIndex,
+    afterTrackIndex: anchorIndex,
+    beforeTrackIndex: nextIndex,
     text: '',
     ttsUrl: null,
     ttsStatus: 'silent',
@@ -606,7 +629,7 @@ function dedupFilter(songs, dedupState) {
 /**
  * Find segments for a specific track position.
  *
- * @param {Map} segmentMap - stationState segments (key: "position:anchorIndex")
+ * @param {Map} segmentMap - stationState segments (key: "position:index")
  * @param {number} trackIndex - Track's index in the queue
  * @returns {{ beforeTrack: Segment|null, afterTrack: Segment|null }}
  */
@@ -615,12 +638,12 @@ function getSegmentsForTrack(segmentMap, trackIndex) {
     return { beforeTrack: null, afterTrack: null };
   }
 
-  // Check for before_track and between_tracks segments
-  const beforeKey = `between_tracks:${trackIndex - 1}`;
+  // Bridge: keyed by afterTrackIndex (gap after previous track = before this track)
+  const bridgeKey = `between_tracks:${trackIndex - 1}`;
   const coldOpenKey = `before_track:${trackIndex}`;
-  const beforeTrack = segmentMap.get(coldOpenKey) || segmentMap.get(beforeKey) || null;
+  const beforeTrack = segmentMap.get(coldOpenKey) || segmentMap.get(bridgeKey) || null;
 
-  // Check for after_track segment
+  // Back announce: keyed by afterTrackIndex (this track)
   const afterKey = `after_track:${trackIndex}`;
   const afterTrack = segmentMap.get(afterKey) || null;
 
@@ -628,15 +651,21 @@ function getSegmentsForTrack(segmentMap, trackIndex) {
 }
 
 /**
- * Store segments in a Map keyed by "position:anchorIndex" for O(1) lookup.
+ * Store segments in a Map keyed by "position:index" for O(1) lookup.
+ * Uses afterTrackIndex for between_tracks/after_track, beforeTrackIndex for before_track.
  * @param {Array<Segment>} segments
  * @returns {Map<string, Segment>}
  */
 function buildSegmentMap(segments) {
   const map = new Map();
   for (const seg of segments) {
-    const key = `${seg.position}:${seg.anchorTrackIndex}`;
-    map.set(key, seg);
+    const index = seg.position === 'before_track'
+      ? (seg.beforeTrackIndex ?? seg.afterTrackIndex)
+      : (seg.afterTrackIndex ?? seg.beforeTrackIndex);
+    if (index !== null && index !== undefined) {
+      const key = `${seg.position}:${index}`;
+      map.set(key, seg);
+    }
   }
   return map;
 }

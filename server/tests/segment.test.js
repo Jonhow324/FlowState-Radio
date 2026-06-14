@@ -74,7 +74,8 @@ describe('Segment Engine', () => {
       expect(result).toHaveLength(2);
       expect(result[0].type).toBe('cold_open');
       expect(result[1].type).toBe('quick_touch');
-      expect(result[0].anchorTrackIndex).toBe(-1);
+      expect(result[0].afterTrackIndex).toBeNull();
+      expect(result[0].beforeTrackIndex).toBeNull();
     });
 
     it('filters to cold_open/quick_touch when tracks is null', () => {
@@ -98,7 +99,8 @@ describe('Segment Engine', () => {
 
       // cold_open defaults to before_track
       expect(result[0].position).toBe('before_track');
-      expect(result[0].anchorTrackIndex).toBe(0);
+      expect(result[0].beforeTrackIndex).toBe(0);
+      expect(result[0].afterTrackIndex).toBeNull();
       expect(result[0].ttsStatus).toBe('pending');
 
       // bridge defaults to between_tracks
@@ -126,8 +128,10 @@ describe('Segment Engine', () => {
         { type: 'bridge', text: 'negative', anchor: -5 },
       ];
       const result = normalizeSegments(raw, sampleTracks);
-      expect(result[0].anchorTrackIndex).toBe(sampleTracks.length - 1);
-      expect(result[1].anchorTrackIndex).toBe(0);
+      expect(result[0].afterTrackIndex).toBe(sampleTracks.length - 1);
+      expect(result[0].beforeTrackIndex).toBeNull();
+      expect(result[1].afterTrackIndex).toBe(0);
+      expect(result[1].beforeTrackIndex).toBe(1);
     });
 
     it('marks silence segments as silent', () => {
@@ -386,11 +390,11 @@ describe('Segment Engine', () => {
 
   describe('buildSegmentMap()', () => {
 
-    it('builds a map keyed by position:anchorIndex', () => {
+    it('builds a map keyed by position:index', () => {
       const segments = [
-        { position: 'before_track', anchorTrackIndex: 0, type: 'cold_open' },
-        { position: 'between_tracks', anchorTrackIndex: 0, type: 'bridge' },
-        { position: 'after_track', anchorTrackIndex: 1, type: 'back_announce' },
+        { position: 'before_track', beforeTrackIndex: 0, afterTrackIndex: null, type: 'cold_open' },
+        { position: 'between_tracks', afterTrackIndex: 0, beforeTrackIndex: 1, type: 'bridge' },
+        { position: 'after_track', afterTrackIndex: 1, beforeTrackIndex: null, type: 'back_announce' },
       ];
       const map = buildSegmentMap(segments);
       expect(map.size).toBe(3);
@@ -406,8 +410,8 @@ describe('Segment Engine', () => {
 
     it('later segment overwrites earlier one with same key', () => {
       const segments = [
-        { position: 'before_track', anchorTrackIndex: 0, text: 'first' },
-        { position: 'before_track', anchorTrackIndex: 0, text: 'second' },
+        { position: 'before_track', beforeTrackIndex: 0, afterTrackIndex: null, text: 'first' },
+        { position: 'before_track', beforeTrackIndex: 0, afterTrackIndex: null, text: 'second' },
       ];
       const map = buildSegmentMap(segments);
       expect(map.size).toBe(1);
@@ -630,7 +634,7 @@ describe('Segment Engine', () => {
 
     it('finds cold_open segment for track 0', () => {
       const segments = [
-        { position: 'before_track', anchorTrackIndex: 0, type: 'cold_open', text: '开场' },
+        { position: 'before_track', beforeTrackIndex: 0, afterTrackIndex: null, type: 'cold_open', text: '开场' },
       ];
       const map = buildSegmentMap(segments);
       const result = getSegmentsForTrack(map, 0);
@@ -641,7 +645,7 @@ describe('Segment Engine', () => {
 
     it('finds bridge segment (between_tracks) for track', () => {
       const segments = [
-        { position: 'between_tracks', anchorTrackIndex: 0, type: 'bridge', text: '过渡' },
+        { position: 'between_tracks', afterTrackIndex: 0, beforeTrackIndex: 1, type: 'bridge', text: '过渡' },
       ];
       const map = buildSegmentMap(segments);
       // Track index 1 should find between_tracks:0 as its beforeTrack
@@ -652,7 +656,7 @@ describe('Segment Engine', () => {
 
     it('finds after_track segment', () => {
       const segments = [
-        { position: 'after_track', anchorTrackIndex: 2, type: 'back_announce', text: '回顾' },
+        { position: 'after_track', afterTrackIndex: 2, beforeTrackIndex: null, type: 'back_announce', text: '回顾' },
       ];
       const map = buildSegmentMap(segments);
       const result = getSegmentsForTrack(map, 2);
@@ -662,7 +666,7 @@ describe('Segment Engine', () => {
 
     it('prefers cold_open over bridge for beforeTrack', () => {
       const segments = [
-        { position: 'before_track', anchorTrackIndex: 0, type: 'cold_open', text: '开场' },
+        { position: 'before_track', beforeTrackIndex: 0, afterTrackIndex: null, type: 'cold_open', text: '开场' },
         // between_tracks:-1 doesn't make sense but let's test at track 0
       ];
       const map = buildSegmentMap(segments);
@@ -723,8 +727,8 @@ describe('Segment Engine', () => {
 
     it('preserves Brain explicit decisions', () => {
       const brainSegments = [
-        { position: 'between_tracks', anchorTrackIndex: 0, type: 'silence', text: '' },
-        { position: 'between_tracks', anchorTrackIndex: 2, type: 'bridge', text: '自然过渡' },
+        { position: 'between_tracks', afterTrackIndex: 0, type: 'silence', text: '' },
+        { position: 'between_tracks', afterTrackIndex: 2, type: 'bridge', text: '自然过渡' },
       ];
       const result = fillMissingSegments(4, brainSegments);
       expect(result.size).toBe(3); // 4 tracks = 3 gaps
@@ -734,7 +738,7 @@ describe('Segment Engine', () => {
 
     it('marks filled gaps with _filled: true', () => {
       const brainSegments = [
-        { position: 'between_tracks', anchorTrackIndex: 0, type: 'bridge' },
+        { position: 'between_tracks', afterTrackIndex: 0, type: 'bridge' },
       ];
       const result = fillMissingSegments(3, brainSegments);
       expect(result.get(0)._filled).toBeUndefined(); // Brain decision
@@ -758,8 +762,8 @@ describe('Segment Engine', () => {
 
     it('ignores non-between_tracks segments', () => {
       const brainSegments = [
-        { position: 'before_track', anchorTrackIndex: 0, type: 'cold_open', text: '开场' },
-        { position: 'after_track', anchorTrackIndex: 1, type: 'back_announce', text: '回顾' },
+        { position: 'before_track', beforeTrackIndex: 0, type: 'cold_open', text: '开场' },
+        { position: 'after_track', afterTrackIndex: 1, type: 'back_announce', text: '回顾' },
       ];
       const result = fillMissingSegments(3, brainSegments);
       expect(result.size).toBe(2);
@@ -799,7 +803,8 @@ describe('Segment Engine', () => {
       );
       expect(seg.type).toBe('back_announce');
       expect(seg.position).toBe('after_track');
-      expect(seg.anchorTrackIndex).toBe(2);
+      expect(seg.afterTrackIndex).toBe(2);
+      expect(seg.beforeTrackIndex).toBeNull();
       expect(seg.ttsStatus).toBe('pending');
       expect(seg.text).toBeTruthy();
       expect(seg.id).toContain('back_announce');
@@ -821,11 +826,18 @@ describe('Segment Engine', () => {
       const seg = buildSilenceSegment(3, 'night_mode', 'test');
       expect(seg.type).toBe('silence');
       expect(seg.position).toBe('between_tracks');
-      expect(seg.anchorTrackIndex).toBe(3);
+      expect(seg.afterTrackIndex).toBe(3);
+      expect(seg.beforeTrackIndex).toBeNull();
       expect(seg.text).toBe('');
       expect(seg.ttsStatus).toBe('silent');
       expect(seg.transitionStyle).toBe('none');
       expect(seg.metadata.silenceReason).toBe('night_mode');
+    });
+
+    it('accepts optional nextIndex for beforeTrackIndex', () => {
+      const seg = buildSilenceSegment(2, 'same_artist', 'test', 3);
+      expect(seg.afterTrackIndex).toBe(2);
+      expect(seg.beforeTrackIndex).toBe(3);
     });
   });
 });

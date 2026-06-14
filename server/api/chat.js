@@ -88,7 +88,7 @@ router.post('/', async (req, res) => {
                   const bridgeSegs = fbSegs.filter(s => s.type === 'bridge' && s.ttsStatus === 'ready');
                   if (bridgeSegs.length > 0) {
                     fbTransitionSeg = bridgeSegs[0];
-                    fbSegKey = `${fbTransitionSeg.position}:${fbTransitionSeg.anchorTrackIndex}`;
+                    fbSegKey = `${fbTransitionSeg.position}:${fbTransitionSeg.afterTrackIndex}`;
                   }
                 }
                 if (fbTransitionSeg) {
@@ -150,7 +150,7 @@ router.post('/', async (req, res) => {
             const bridgeSegs = allSegs.filter(s => s.type === 'bridge' && s.ttsStatus === 'ready');
             if (bridgeSegs.length > 0) {
               transitionSeg = bridgeSegs[0];
-              consumedSegKey = `${transitionSeg.position}:${transitionSeg.anchorTrackIndex}`;
+              consumedSegKey = `${transitionSeg.position}:${transitionSeg.afterTrackIndex}`;
             }
           }
 
@@ -436,95 +436,108 @@ router.post('/', async (req, res) => {
             const completeDecisions = segmentEngine.fillMissingSegments(
               resolvedTracks.length, normalizedSegments
             );
+            // Serialize to plain object for job payloads
+            const decisionsObj = Object.fromEntries(completeDecisions);
 
-            jobQueue.enqueue({
-              type: 'bridge_generation',
-              dedupKey: `bridge:chat:${Date.now()}:${process.hrtime.bigint()}`,
-              payload: { tracks: tracksSnapshot, completeDecisions: Array.from(completeDecisions.entries()) },
-              execute: async (payload) => {
-                // Reconstruct Map from serialized entries
-                const decisionMap = new Map(payload.completeDecisions);
+            // ── Per-seam async bridge generation: one job per gap ──
+            for (let i = 0; i < tracksSnapshot.length - 1; i++) {
+              const gapIndex = i;
+              const decision = completeDecisions.get(i);
 
-                // Build enriched bridge context once for this batch
-                const bridgeContext = personaLoader.buildBridgeContext();
-
-                for (let i = 0; i < payload.tracks.length - 1; i++) {
+              jobQueue.enqueue({
+                type: 'bridge_generation',
+                dedupKey: `bridge:chat:${Date.now()}:${gapIndex}`,
+                payload: {
+                  prevTrack: tracksSnapshot[i],
+                  nextTrack: tracksSnapshot[i + 1],
+                  gapIndex,
+                  decision,
+                },
+                execute: async (payload) => {
                   const prev = {
-                    name: payload.tracks[i].trackName,
-                    artist: payload.tracks[i].artist,
-                    tags: state.getTrackMeta(payload.tracks[i].trackId)?.tags || '',
+                    name: payload.prevTrack.trackName,
+                    artist: payload.prevTrack.artist,
+                    tags: state.getTrackMeta(payload.prevTrack.trackId)?.tags || '',
                   };
                   const next = {
-                    name: payload.tracks[i + 1].trackName,
-                    artist: payload.tracks[i + 1].artist,
-                    tags: state.getTrackMeta(payload.tracks[i + 1].trackId)?.tags || '',
+                    name: payload.nextTrack.trackName,
+                    artist: payload.nextTrack.artist,
+                    tags: state.getTrackMeta(payload.nextTrack.trackId)?.tags || '',
                   };
 
-                  // ── Look up decision (Brain or fillMissingSegments fallback) ──
-                  const decision = decisionMap.get(i);
+                  const dec = payload.decision;
 
-                  if (decision?.type === 'silence') {
-                    // Silence — either Brain decided or night-time fallback
-                    const reason = decision._filled ? 'fill_night' : 'brain_decision';
-                    const silenceSeg = segmentEngine.buildSilenceSegment(i, reason, 'chat');
-                    state.addSegment(`between_tracks:${i}`, silenceSeg);
+                  if (dec?.type === 'silence') {
+                    const reason = dec._filled ? 'fill_night' : 'brain_decision';
+                    const silenceSeg = segmentEngine.buildSilenceSegment(
+                      payload.gapIndex, reason, 'chat', payload.gapIndex + 1
+                    );
+                    state.addSegment(`between_tracks:${payload.gapIndex}`, silenceSeg);
                     broadcast({ type: 'segment-ready', data: silenceSeg });
-                    logger.info('CHAT', `Gap[${i}] → silence (${reason})`);
+                    logger.info('CHAT', `Gap[${payload.gapIndex}] → silence (${reason})`);
                   } else {
-                    // Bridge — Brain decided or daytime fallback
+                    const bridgeContext = personaLoader.buildBridgeContext();
                     const bridgeInfo = await segmentEngine.generateBridgeLLM(prev, next, brain.deepseek, {
                       bridgeContext,
                     });
-                    const decisionSource = decision?._filled ? 'fill' : 'brain';
-                    logger.info('CHAT', `Gap[${i}] ${decisionSource}: (${bridgeInfo.source}): "${bridgeInfo.text.slice(0, 50)}..."`);
+                    const decisionSource = dec?._filled ? 'fill' : 'brain';
+                    logger.info('CHAT', `Gap[${payload.gapIndex}] ${decisionSource}: (${bridgeInfo.source}): "${bridgeInfo.text.slice(0, 50)}..."`);
                     const bridgeSeg = {
-                      id: `seg:bridge:${i}:post`,
+                      id: `seg:bridge:${payload.gapIndex}:post`,
                       type: 'bridge',
                       position: 'between_tracks',
-                      anchorTrackIndex: i,
+                      afterTrackIndex: payload.gapIndex,
+                      beforeTrackIndex: payload.gapIndex + 1,
                       text: bridgeInfo.text,
                       ttsUrl: null,
                       ttsStatus: 'pending',
                       transitionStyle: bridgeInfo.transitionStyle,
-                      metadata: { prevSong: prev, nextSong: next, bridgeSource: bridgeInfo.source, brainDecision: !decision?._filled },
+                      metadata: { prevSong: prev, nextSong: next, bridgeSource: bridgeInfo.source, brainDecision: !dec?._filled },
                     };
                     await segmentEngine.resolveSegmentTTS(bridgeSeg);
-                    state.addSegment(`between_tracks:${i}`, bridgeSeg);
+                    state.addSegment(`between_tracks:${payload.gapIndex}`, bridgeSeg);
                     broadcast({ type: 'segment-ready', data: bridgeSeg });
                   }
 
                   // Back announce — only if Brain explicitly included one
                   const brainBackAnnounce = normalizedSegments.find(
-                    s => s.position === 'after_track' && s.anchorTrackIndex === i
+                    s => s.position === 'after_track' && s.afterTrackIndex === payload.gapIndex
                   );
                   if (brainBackAnnounce) {
-                    const backSeg = segmentEngine.buildBackAnnounceSegment(prev, i, 'chat');
+                    const backSeg = segmentEngine.buildBackAnnounceSegment(prev, payload.gapIndex, 'chat');
                     await segmentEngine.resolveSegmentTTS(backSeg);
-                    state.addSegment(`after_track:${i}`, backSeg);
+                    state.addSegment(`after_track:${payload.gapIndex}`, backSeg);
                     broadcast({ type: 'segment-ready', data: backSeg });
                   }
-                }
+                },
+              });
+            }
 
-                // Last track: back_announce only if Brain explicitly included one
-                if (payload.tracks.length > 0) {
-                  const lastIdx = payload.tracks.length - 1;
-                  const lastBackAnnounce = normalizedSegments.find(
-                    s => s.position === 'after_track' && s.anchorTrackIndex === lastIdx
-                  );
-                  if (lastBackAnnounce) {
+            // Last track: back_announce only if Brain explicitly included one
+            if (tracksSnapshot.length > 0) {
+              const lastIdx = tracksSnapshot.length - 1;
+              const lastBackAnnounce = normalizedSegments.find(
+                s => s.position === 'after_track' && s.afterTrackIndex === lastIdx
+              );
+              if (lastBackAnnounce) {
+                jobQueue.enqueue({
+                  type: 'bridge_generation',
+                  dedupKey: `bridge:chat:${Date.now()}:back:${lastIdx}`,
+                  payload: { lastTrack: tracksSnapshot[lastIdx], lastIdx },
+                  execute: async (payload) => {
                     const lastTrack = {
-                      name: payload.tracks[lastIdx].trackName,
-                      artist: payload.tracks[lastIdx].artist,
-                      tags: state.getTrackMeta(payload.tracks[lastIdx].trackId)?.tags || '',
+                      name: payload.lastTrack.trackName,
+                      artist: payload.lastTrack.artist,
+                      tags: state.getTrackMeta(payload.lastTrack.trackId)?.tags || '',
                     };
-                    const lastBack = segmentEngine.buildBackAnnounceSegment(lastTrack, lastIdx, 'chat-last');
+                    const lastBack = segmentEngine.buildBackAnnounceSegment(lastTrack, payload.lastIdx, 'chat-last');
                     await segmentEngine.resolveSegmentTTS(lastBack);
-                    state.addSegment(`after_track:${lastIdx}`, lastBack);
+                    state.addSegment(`after_track:${payload.lastIdx}`, lastBack);
                     broadcast({ type: 'segment-ready', data: lastBack });
-                  }
-                }
-              },
-            });
+                  },
+                });
+              }
+            }
           }
 
           // Play the first one immediately
@@ -591,7 +604,8 @@ router.post('/', async (req, res) => {
                     id: 'seg:cold_open:0:gen',
                     type: 'cold_open',
                     position: 'before_track',
-                    anchorTrackIndex: 0,
+                    afterTrackIndex: null,
+                    beforeTrackIndex: 0,
                     text: coldOpenResult.text,
                     ttsUrl: null,
                     ttsStatus: 'pending',

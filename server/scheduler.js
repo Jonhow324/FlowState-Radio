@@ -372,7 +372,7 @@ class Scheduler {
             data: { queue: state.getQueue() },
           });
 
-          // ── Phase 3: Enqueue bridge + back_announce + silence generation ──
+          // ── Phase 3: Per-seam bridge generation for refill ──
           this._refillBatch++;
           const batchId = this._refillBatch;
           const broadcast = this.broadcast; // Capture for jobQueue closure
@@ -383,31 +383,30 @@ class Scheduler {
             artist: t.artist,
           }));
 
-          jobQueue.enqueue({
-            type: 'bridge_generation',
-            dedupKey: `bridge:refill:${batchId}`,
-            payload: { tracks: tracksSnapshot, batchId },
-            execute: async (payload) => {
-              // Build enriched bridge context once for this batch
-              const bridgeContext = personaLoader.buildBridgeContext();
-
-              for (let i = 0; i < payload.tracks.length - 1; i++) {
+          // One job per gap — independent, fault-isolated
+          for (let i = 0; i < tracksSnapshot.length - 1; i++) {
+            jobQueue.enqueue({
+              type: 'bridge_generation',
+              dedupKey: `bridge:refill:${batchId}:${i}`,
+              payload: {
+                prevTrack: tracksSnapshot[i],
+                nextTrack: tracksSnapshot[i + 1],
+                gapIndex: i,
+                batchId,
+              },
+              execute: async (payload) => {
                 const prev = {
-                  name: payload.tracks[i].trackName,
-                  artist: payload.tracks[i].artist,
-                  tags: state.getTrackMeta(payload.tracks[i].trackId)?.tags || '',
+                  name: payload.prevTrack.trackName,
+                  artist: payload.prevTrack.artist,
+                  tags: state.getTrackMeta(payload.prevTrack.trackId)?.tags || '',
                 };
                 const next = {
-                  name: payload.tracks[i + 1].trackName,
-                  artist: payload.tracks[i + 1].artist,
-                  tags: state.getTrackMeta(payload.tracks[i + 1].trackId)?.tags || '',
+                  name: payload.nextTrack.trackName,
+                  artist: payload.nextTrack.artist,
+                  tags: state.getTrackMeta(payload.nextTrack.trackId)?.tags || '',
                 };
 
-                // Refill path: no Brain rhythm decisions available
-                // Deterministic rules:
-                //   - same artist → silence
-                //   - night (23:00-06:00) → silence
-                //   - otherwise → bridge
+                // Refill path: deterministic rules
                 const sameArtist = prev.artist && next.artist &&
                   prev.artist.toLowerCase() === next.artist.toLowerCase();
                 const hour = new Date().getHours();
@@ -415,20 +414,24 @@ class Scheduler {
 
                 if (sameArtist || isNight) {
                   const reason = sameArtist ? 'same_artist_refill' : 'night_refill';
-                  const silenceSeg = segmentEngine.buildSilenceSegment(i, reason, `refill${payload.batchId}`);
-                  state.addSegment(`between_tracks:refill:${payload.batchId}:${i}`, silenceSeg);
+                  const silenceSeg = segmentEngine.buildSilenceSegment(
+                    payload.gapIndex, reason, `refill${payload.batchId}`, payload.gapIndex + 1
+                  );
+                  state.addSegment(`between_tracks:${payload.gapIndex}`, silenceSeg);
                   broadcast({ type: 'segment-ready', data: silenceSeg });
-                  logger.info('SCHEDULER', `Bridge[${i}] → silence (${reason})`);
+                  logger.info('SCHEDULER', `Bridge[${payload.gapIndex}] → silence (${reason})`);
                 } else {
+                  const bridgeContext = personaLoader.buildBridgeContext();
                   const bridgeInfo = await segmentEngine.generateBridgeLLM(prev, next, deepseek, {
                     bridgeContext,
                   });
-                  logger.info('SCHEDULER', `Bridge[${i}] (${bridgeInfo.source}): "${bridgeInfo.text.slice(0, 50)}..."`);
+                  logger.info('SCHEDULER', `Bridge[${payload.gapIndex}] (${bridgeInfo.source}): "${bridgeInfo.text.slice(0, 50)}..."`);
                   const bridgeSeg = {
-                    id: `seg:bridge:refill:${payload.batchId}:${i}`,
+                    id: `seg:bridge:refill:${payload.batchId}:${payload.gapIndex}`,
                     type: 'bridge',
                     position: 'between_tracks',
-                    anchorTrackIndex: i,
+                    afterTrackIndex: payload.gapIndex,
+                    beforeTrackIndex: payload.gapIndex + 1,
                     text: bridgeInfo.text,
                     ttsUrl: null,
                     ttsStatus: 'pending',
@@ -436,12 +439,12 @@ class Scheduler {
                     metadata: { prevSong: prev, nextSong: next, bridgeSource: bridgeInfo.source },
                   };
                   await segmentEngine.resolveSegmentTTS(bridgeSeg);
-                  state.addSegment(`between_tracks:refill:${payload.batchId}:${i}`, bridgeSeg);
+                  state.addSegment(`between_tracks:${payload.gapIndex}`, bridgeSeg);
                   broadcast({ type: 'segment-ready', data: bridgeSeg });
                 }
-              }
-            },
-          });
+              },
+            });
+          }
         }
       } else {
         logger.warn('SCHEDULER', 'Rolling queue refill: no tracks resolved');

@@ -115,7 +115,7 @@ router.post('/play', async (req, res) => {
       }
 
       if (queueBridgeSeg && queueBridgeSeg.ttsUrl) {
-        state.removeSegment(`${queueBridgeSeg.position}:${queueBridgeSeg.anchorTrackIndex}`);
+        state.removeSegment(`${queueBridgeSeg.position}:${queueBridgeSeg.afterTrackIndex ?? queueBridgeSeg.beforeTrackIndex}`);
         fillerData = { text: queueBridgeSeg.text, ttsUrl: queueBridgeSeg.ttsUrl, type: 'bridge' };
         transitionStyle = queueBridgeSeg.transitionStyle || 'intro';
       }
@@ -220,7 +220,7 @@ router.post('/skip', async (req, res) => {
         const allSegs = state.getAllSegments();
         const consumedBridge = allSegs.find(s => s.type === 'bridge' && s.ttsStatus === 'ready');
         if (consumedBridge) {
-          state.removeSegment(`${consumedBridge.position}:${consumedBridge.anchorTrackIndex}`);
+          state.removeSegment(`${consumedBridge.position}:${consumedBridge.afterTrackIndex ?? consumedBridge.beforeTrackIndex}`);
           logger.info('PLAYER', 'Bridge already played during outro, consuming segment');
         }
         // No TTS attached — bridge was already heard
@@ -234,7 +234,7 @@ router.post('/skip', async (req, res) => {
 
         if (bridgeSeg && bridgeSeg.ttsUrl) {
           // Use pre-generated bridge segment and mark as consumed
-          state.removeSegment(`${bridgeSeg.position}:${bridgeSeg.anchorTrackIndex}`);
+          state.removeSegment(`${bridgeSeg.position}:${bridgeSeg.afterTrackIndex ?? bridgeSeg.beforeTrackIndex}`);
           fillerData = { text: bridgeSeg.text, ttsUrl: bridgeSeg.ttsUrl, type: 'bridge' };
           transitionStyle = bridgeSeg.transitionStyle || 'intro';
         }

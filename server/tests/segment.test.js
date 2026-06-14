@@ -3,6 +3,29 @@
 //        generateBridgeText, generateBridgeLLM, getSegmentsForTrack
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import seg from '../services/segmentEngine.js';
+
+const {
+  normalizeSegments,
+  dedupCheck,
+  dedupFilter,
+  buildSegmentMap,
+  generateBridgeText,
+  generateBridgeLLM,
+  generateBackAnnounce,
+  getSegmentsForTrack,
+  fillMissingSegments,
+  buildBackAnnounceSegment,
+  buildSilenceSegment,
+  normalizeBridgeOutput,
+  checkBridgeDedup,
+  charOverlap,
+  recordBridgeText,
+  resetBridgeHistory,
+  VALID_TYPES,
+  VALID_POSITIONS,
+  COLD_OPEN_PARTS,
+} = seg;
 
 // ── Silence console during tests ─────────────────────────────
 beforeEach(() => {
@@ -12,285 +35,6 @@ beforeEach(() => {
 afterEach(() => {
   vi.restoreAllMocks();
 });
-
-// ── Re-implement pure functions locally (avoid module deps) ──
-
-const VALID_TYPES = new Set([
-  'cold_open', 'bridge', 'back_announce', 'quick_touch', 'silence',
-]);
-
-const VALID_POSITIONS = new Set([
-  'before_track', 'between_tracks', 'after_track',
-]);
-
-function normalizeSegments(rawSegments, tracks) {
-  if (!Array.isArray(rawSegments)) return [];
-  if (!tracks || tracks.length === 0) {
-    return rawSegments
-      .filter((s) => s.type === 'cold_open' || s.type === 'quick_touch')
-      .map((s, i) => ({
-        id: `seg:immediate:${i}`,
-        type: VALID_TYPES.has(s.type) ? s.type : 'quick_touch',
-        position: 'before_track',
-        anchorTrackIndex: -1,
-        text: (s.text || '').trim(),
-        ttsUrl: null,
-        ttsStatus: 'pending',
-        transitionStyle: 'none',
-        metadata: {},
-      }));
-  }
-
-  const maxIndex = tracks.length - 1;
-  const results = [];
-
-  for (let i = 0; i < rawSegments.length; i++) {
-    const raw = rawSegments[i];
-    const type = VALID_TYPES.has(raw.type) ? raw.type : 'quick_touch';
-
-    let position = VALID_POSITIONS.has(raw.position) ? raw.position : null;
-    if (!position) {
-      if (type === 'cold_open') position = 'before_track';
-      else if (type === 'bridge') position = 'between_tracks';
-      else if (type === 'back_announce') position = 'after_track';
-      else position = 'between_tracks';
-    }
-
-    let anchor = typeof raw.anchor === 'number' ? raw.anchor : i;
-    anchor = Math.max(0, Math.min(anchor, maxIndex));
-
-    const text = (raw.text || '').trim();
-    const ttsStatus = type === 'silence' ? 'silent' : (text ? 'pending' : 'silent');
-    const transitionStyle = raw.transition_style || raw.transitionStyle || 'outro';
-
-    const metadata = {};
-    if (position === 'between_tracks' || position === 'after_track') {
-      const prevIdx = Math.max(0, anchor);
-      if (tracks[prevIdx]) {
-        metadata.prevSong = { name: tracks[prevIdx].name || tracks[prevIdx].trackName, artist: tracks[prevIdx].artist };
-      }
-    }
-    if (position === 'between_tracks' || position === 'before_track') {
-      const nextIdx = position === 'between_tracks' ? anchor + 1 : anchor;
-      if (tracks[nextIdx]) {
-        metadata.nextSong = { name: tracks[nextIdx].name || tracks[nextIdx].trackName, artist: tracks[nextIdx].artist };
-      }
-    }
-
-    results.push({
-      id: `seg:${type}:${anchor}:${i}`,
-      type, position, anchorTrackIndex: anchor,
-      text, ttsUrl: null, ttsStatus, transitionStyle, metadata,
-    });
-  }
-
-  return results;
-}
-
-function dedupCheck(track, dedupState) {
-  const trackId = track.trackId || track.track_id;
-  const artist = (track.artist || '').toLowerCase();
-
-  if (dedupState.batchIds && dedupState.batchIds.has(trackId)) {
-    return { allowed: false, reason: 'batch_duplicate' };
-  }
-  if (dedupState.queueIds && dedupState.queueIds.has(trackId)) {
-    return { allowed: false, reason: 'queue_duplicate' };
-  }
-  if (dedupState.recentPlays && dedupState.recentPlays.length > 0) {
-    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-    const recentlyPlayed = dedupState.recentPlays.filter(
-      (p) => new Date(p.playedAt || p.played_at).getTime() > cutoff
-    );
-    if (recentlyPlayed.some((p) => (p.trackId || p.track_id) === trackId)) {
-      return { allowed: false, reason: 'cooldown_duplicate' };
-    }
-    const last5 = dedupState.recentPlays.slice(0, 5);
-    const recentArtists = new Set(
-      last5.map((p) => (p.artist || '').toLowerCase()).filter(Boolean)
-    );
-    if (artist && recentArtists.has(artist)) {
-      return { allowed: false, reason: 'artist_overexposure' };
-    }
-  }
-  return { allowed: true, reason: null };
-}
-
-function dedupFilter(songs, dedupState) {
-  const accepted = [];
-  const rejected = [];
-  const batchIds = new Set(dedupState.batchIds || []);
-
-  for (const song of songs) {
-    const trackId = song.trackId || song.track_id || song.ncmTrackId;
-    const checkState = { ...dedupState, batchIds };
-    const result = dedupCheck({ ...song, trackId }, checkState);
-    if (result.allowed) {
-      accepted.push(song);
-      if (trackId) batchIds.add(trackId);
-    } else {
-      rejected.push({ song, reason: result.reason });
-    }
-  }
-  return { accepted, rejected };
-}
-
-function buildSegmentMap(segments) {
-  const map = new Map();
-  for (const seg of segments) {
-    const key = `${seg.position}:${seg.anchorTrackIndex}`;
-    map.set(key, seg);
-  }
-  return map;
-}
-
-function generateBridgeText(prevSong, nextSong) {
-  const templates = [
-    `从${prevSong.artist}的《${prevSong.name}》过渡到${nextSong.artist}的《${nextSong.name}》，音乐在流动。`,
-    `听完《${prevSong.name}》，接下来是${nextSong.artist}带来的《${nextSong.name}》。`,
-    `《${prevSong.name}》的余韵还在，${nextSong.artist}的《${nextSong.name}》已经准备好了。`,
-    `刚才那首《${prevSong.name}》很动人，这首《${nextSong.name}》也不会让你失望。`,
-    `${prevSong.artist}和${nextSong.artist}，两种味道，一样好听。`,
-  ];
-  const text = templates[Math.floor(Math.random() * templates.length)];
-  return { text, transitionStyle: 'outro' };
-}
-
-async function generateBridgeLLM(prevSong, nextSong, deepseek, options = {}) {
-  const fallback = generateBridgeText(prevSong, nextSong);
-
-  if (!deepseek || typeof deepseek.rawChat !== 'function') {
-    return { ...fallback, source: 'template' };
-  }
-
-  const prevName = prevSong.name || prevSong.trackName || '未知';
-  const prevArtist = prevSong.artist || '未知';
-  const nextName = nextSong.name || nextSong.trackName || '未知';
-  const nextArtist = nextSong.artist || '未知';
-
-  let userPrompt = `上一首：${prevArtist} -《${prevName}》`;
-  if (prevSong.tags) userPrompt += `\n标签：${prevSong.tags}`;
-  userPrompt += `\n下一首：${nextArtist} -《${nextName}》`;
-  if (nextSong.tags) userPrompt += `\n标签：${nextSong.tags}`;
-
-  try {
-    const text = await deepseek.rawChat('system', userPrompt, {
-      temperature: options.temperature ?? 0.85,
-      maxTokens: options.maxTokens ?? 200,
-      timeout: options.timeout ?? 15000,
-    });
-
-    const cleaned = text.replace(/^["'"「『【]+/, '').replace(/["'"」』】]+$/, '').trim();
-
-    if (!cleaned) {
-      return { ...fallback, source: 'template' };
-    }
-
-    return { text: cleaned, transitionStyle: 'outro', source: 'llm' };
-  } catch (err) {
-    return { ...fallback, source: 'template' };
-  }
-}
-
-function getSegmentsForTrack(segmentMap, trackIndex) {
-  if (!segmentMap || segmentMap.size === 0) {
-    return { beforeTrack: null, afterTrack: null };
-  }
-  const beforeKey = `between_tracks:${trackIndex - 1}`;
-  const coldOpenKey = `before_track:${trackIndex}`;
-  const beforeTrack = segmentMap.get(coldOpenKey) || segmentMap.get(beforeKey) || null;
-  const afterKey = `after_track:${trackIndex}`;
-  const afterTrack = segmentMap.get(afterKey) || null;
-  return { beforeTrack, afterTrack };
-}
-
-function pickRandom(arr) {
-  return arr[Math.floor(Math.random() * arr.length)];
-}
-
-// ── Phase 2: Back Announce + Silence (local re-implementation) ──
-
-function generateBackAnnounce(song, options = {}) {
-  const name = song.name || song.trackName || '这首歌';
-  const artist = song.artist || '';
-
-  const templates = [
-    `刚才那是${artist ? artist + '的' : ''}《${name}》，${pickRandom(['经典中的经典', '百听不厌', '让人回味无穷', '值得反复品味'])}。`,
-    `${artist ? artist : ''}的《${name}》，${pickRandom(['每次听都有新感受', '总能戳中某个柔软的角落', '旋律还在耳边绕', '情绪还沉浸在里面'])}。`,
-    `一首《${name}》${pickRandom(['送给此刻的你', '献给这个夜晚', '配得上你现在的状态', '刚好契合当下的心情'])}。`,
-    `《${name}》播完了，${pickRandom(['但余韵可以留久一点', '好歌总是让人觉得太短', '让这份感觉多停留一会儿', '音乐停了，情绪还在继续'])}。`,
-  ];
-
-  const tags = (song.tags || '').toLowerCase();
-  if (tags.includes('ambient') || tags.includes('instrumental') || tags.includes('classical')) {
-    return {
-      text: pickRandom([
-        `《${name}》的旋律渐渐散去，什么都不用说。`,
-        `有些音乐不需要语言，刚才的《${name}》就是。`,
-      ]),
-      transitionStyle: 'none',
-    };
-  }
-
-  return { text: pickRandom(templates), transitionStyle: 'none' };
-}
-
-function buildBackAnnounceSegment(song, anchorIndex, idPrefix = 'back') {
-  const info = generateBackAnnounce(song);
-  return {
-    id: `seg:back_announce:${idPrefix}:${anchorIndex}`,
-    type: 'back_announce',
-    position: 'after_track',
-    anchorTrackIndex: anchorIndex,
-    text: info.text,
-    ttsUrl: null,
-    ttsStatus: 'pending',
-    transitionStyle: info.transitionStyle,
-    metadata: { prevSong: { name: song.name || song.trackName, artist: song.artist } },
-  };
-}
-
-function buildSilenceSegment(anchorIndex, reason, idPrefix = 'silence') {
-  return {
-    id: `seg:silence:${idPrefix}:${anchorIndex}`,
-    type: 'silence',
-    position: 'between_tracks',
-    anchorTrackIndex: anchorIndex,
-    text: '',
-    ttsUrl: null,
-    ttsStatus: 'silent',
-    transitionStyle: 'none',
-    metadata: { silenceReason: reason },
-  };
-}
-
-function fillMissingSegments(trackCount, brainSegments) {
-  const decisions = new Map();
-
-  for (const seg of (brainSegments || [])) {
-    if (seg.position === 'between_tracks' && typeof seg.anchorTrackIndex === 'number') {
-      decisions.set(seg.anchorTrackIndex, seg);
-    }
-  }
-
-  const hour = new Date().getHours();
-  const isNight = hour >= 23 || hour < 6;
-  const defaultType = isNight ? 'silence' : 'bridge';
-
-  for (let i = 0; i < trackCount - 1; i++) {
-    if (!decisions.has(i)) {
-      decisions.set(i, {
-        type: defaultType,
-        anchorTrackIndex: i,
-        position: 'between_tracks',
-        text: '',
-        _filled: true,
-      });
-    }
-  }
-
-  return decisions;
-}
 
 // ── Test Data ────────────────────────────────────────────────
 
@@ -703,6 +447,10 @@ describe('Segment Engine', () => {
   // ═══ generateBridgeLLM ═══
 
   describe('generateBridgeLLM()', () => {
+    beforeEach(() => resetBridgeHistory());
+
+    // Mock bridgeContext to avoid personaLoader → stationState dependency
+    const mockBC = { persona: 'Test DJ persona', timeContext: '晚上好', recentPlays: '' };
 
     function createMockDeepseek(response) {
       return {
@@ -721,7 +469,8 @@ describe('Segment Engine', () => {
       const result = await generateBridgeLLM(
         { name: '晴天', artist: '周杰伦' },
         { name: '红豆', artist: '王菲' },
-        deepseek
+        deepseek,
+        { bridgeContext: mockBC }
       );
       expect(result.text).toBe('从摇滚到民谣，情绪在慢慢转弯');
       expect(result.source).toBe('llm');
@@ -733,7 +482,8 @@ describe('Segment Engine', () => {
       await generateBridgeLLM(
         { name: 'SongA', artist: 'ArtistA', tags: 'rock' },
         { name: 'SongB', artist: 'ArtistB', tags: 'jazz' },
-        deepseek
+        deepseek,
+        { bridgeContext: mockBC }
       );
       expect(deepseek.rawChat).toHaveBeenCalledTimes(1);
       const userPrompt = deepseek.rawChat.mock.calls[0][1];
@@ -769,7 +519,8 @@ describe('Segment Engine', () => {
       const result = await generateBridgeLLM(
         { name: '晴天', artist: '周杰伦' },
         { name: '红豆', artist: '王菲' },
-        deepseek
+        deepseek,
+        { bridgeContext: mockBC }
       );
       expect(result.text).toBeTruthy();
       expect(result.source).toBe('template');
@@ -780,7 +531,8 @@ describe('Segment Engine', () => {
       const result = await generateBridgeLLM(
         { name: '晴天', artist: '周杰伦' },
         { name: '红豆', artist: '王菲' },
-        deepseek
+        deepseek,
+        { bridgeContext: mockBC }
       );
       expect(result.source).toBe('template');
     });
@@ -790,7 +542,8 @@ describe('Segment Engine', () => {
       const result = await generateBridgeLLM(
         { name: '晴天', artist: '周杰伦' },
         { name: '红豆', artist: '王菲' },
-        deepseek
+        deepseek,
+        { bridgeContext: mockBC }
       );
       expect(result.source).toBe('llm');
       expect(result.text).toBe('短');
@@ -802,7 +555,8 @@ describe('Segment Engine', () => {
       const result = await generateBridgeLLM(
         { name: '晴天', artist: '周杰伦' },
         { name: '红豆', artist: '王菲' },
-        deepseek
+        deepseek,
+        { bridgeContext: mockBC }
       );
       expect(result.source).toBe('llm');
       expect(result.text).toBe(longText.trim());
@@ -813,7 +567,8 @@ describe('Segment Engine', () => {
       const result = await generateBridgeLLM(
         { name: '晴天', artist: '周杰伦' },
         { name: '红豆', artist: '王菲' },
-        deepseek
+        deepseek,
+        { bridgeContext: mockBC }
       );
       expect(result.text).toBe('从摇滚到民谣，情绪在慢慢转弯');
       expect(result.source).toBe('llm');
@@ -824,7 +579,8 @@ describe('Segment Engine', () => {
       const result = await generateBridgeLLM(
         { name: '晴天', artist: '周杰伦' },
         { name: '红豆', artist: '王菲' },
-        deepseek
+        deepseek,
+        { bridgeContext: mockBC }
       );
       expect(result.text).toBe('音乐在两种风格间自由穿梭');
       expect(result.source).toBe('llm');
@@ -835,7 +591,8 @@ describe('Segment Engine', () => {
       await generateBridgeLLM(
         { trackName: 'TrackA', artist: 'A' },
         { trackName: 'TrackB', artist: 'B' },
-        deepseek
+        deepseek,
+        { bridgeContext: mockBC }
       );
       const userPrompt = deepseek.rawChat.mock.calls[0][1];
       expect(userPrompt).toContain('TrackA');
@@ -847,7 +604,8 @@ describe('Segment Engine', () => {
       await generateBridgeLLM(
         { name: 'A', artist: 'B' },
         { name: 'C', artist: 'D' },
-        deepseek
+        deepseek,
+        { bridgeContext: mockBC }
       );
       const userPrompt = deepseek.rawChat.mock.calls[0][1];
       expect(userPrompt).not.toContain('标签');
@@ -1076,23 +834,8 @@ describe('Segment Engine', () => {
 // normalizeBridgeOutput() — Normalization Pipeline Tests
 // ══════════════════════════════════════════════════════════════
 
-// Re-implement locally (avoid module deps)
-function normalizeBridgeOutput(rawText, fallback) {
-  const cleaned = (rawText || '')
-    .replace(/^["'"「『【《\s]+/, '')
-    .replace(/["'"」』】》\s]+$/, '')
-    .replace(/```[\s\S]*```/g, '')
-    .replace(/^\d+[.、)\]]\s*/, '')
-    .trim();
-
-  if (!cleaned) {
-    return { text: fallback.text, source: 'template', dedup: 'skipped' };
-  }
-
-  return { text: cleaned, source: 'llm', dedup: 'passed' };
-}
-
 describe('normalizeBridgeOutput()', () => {
+  beforeEach(() => resetBridgeHistory());
   const fallback = { text: '模板fallback文本', source: 'template' };
 
   it('cleans leading/trailing quotes', () => {
@@ -1145,59 +888,36 @@ describe('normalizeBridgeOutput()', () => {
 // checkBridgeDedup() — Bridge Text Deduplication Tests
 // ══════════════════════════════════════════════════════════════
 
-// Re-implement locally
-function charOverlap(a, b) {
-  if (!a || !b) return 0;
-  const shorter = a.length < b.length ? a : b;
-  const longer = a.length >= b.length ? a : b;
-  let matches = 0;
-  const longerChars = new Set(longer.split(''));
-  for (const ch of shorter) {
-    if (longerChars.has(ch)) {
-      matches++;
-      longerChars.delete(ch);
-    }
-  }
-  return matches / shorter.length;
-}
-
-function checkBridgeDedup(text, history, threshold = 0.4) {
-  if (!text || history.length === 0) return { allowed: true, reason: null };
-  for (const prev of history) {
-    if (text === prev) return { allowed: false, reason: 'exact_duplicate' };
-    const overlap = charOverlap(text, prev);
-    if (overlap > threshold) return { allowed: false, reason: `too_similar (${(overlap * 100).toFixed(0)}% overlap)` };
-  }
-  return { allowed: true, reason: null };
-}
-
 describe('checkBridgeDedup()', () => {
+  beforeEach(() => resetBridgeHistory());
+
   it('allows text with empty history', () => {
-    const result = checkBridgeDedup('新的过渡文字', []);
+    const result = checkBridgeDedup('新的过渡文字');
     expect(result.allowed).toBe(true);
   });
 
   it('blocks exact duplicates', () => {
-    const history = ['从安静到温柔的过渡'];
-    const result = checkBridgeDedup('从安静到温柔的过渡', history);
+    recordBridgeText('从安静到温柔的过渡');
+    const result = checkBridgeDedup('从安静到温柔的过渡');
     expect(result.allowed).toBe(false);
     expect(result.reason).toBe('exact_duplicate');
   });
 
   it('blocks very similar texts', () => {
-    const history = ['周杰伦的歌总是让人想起青春'];
-    const result = checkBridgeDedup('周杰伦的歌总让人回忆起青春', history);
+    recordBridgeText('周杰伦的歌总是让人想起青春');
+    const result = checkBridgeDedup('周杰伦的歌总让人回忆起青春');
     expect(result.allowed).toBe(false);
   });
 
   it('allows sufficiently different texts', () => {
-    const history = ['从摇滚到民谣的风格转变'];
-    const result = checkBridgeDedup('深夜的爵士乐像一杯红酒', history);
+    recordBridgeText('从摇滚到民谣的风格转变');
+    const result = checkBridgeDedup('深夜的爵士乐像一杯红酒');
     expect(result.allowed).toBe(true);
   });
 
   it('handles null text', () => {
-    const result = checkBridgeDedup(null, ['history']);
+    recordBridgeText('some history');
+    const result = checkBridgeDedup(null);
     expect(result.allowed).toBe(true);
   });
 });

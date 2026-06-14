@@ -79,6 +79,10 @@ function useWebSocket() {
         if (data.text) {
           store.setDjMessage(data.text);
         }
+        // If we're in the segue window, trigger outro talk immediately
+        if (data.type === 'bridge') {
+          store.trySegueOutro();
+        }
       });
 
       // Handle morning briefing (DJ greeting + first song)

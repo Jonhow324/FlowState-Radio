@@ -270,6 +270,13 @@ function checkBridgeDedup(text, threshold = 0.4) {
 }
 
 /**
+ * Reset bridge history (for testing).
+ */
+function resetBridgeHistory() {
+  _bridgeTextHistory = [];
+}
+
+/**
  * Calculate character-level overlap ratio between two strings.
  * Returns 0 (completely different) to 1 (identical).
  */
@@ -651,6 +658,8 @@ module.exports = {
   normalizeBridgeOutput,
   checkBridgeDedup,
   recordBridgeText,
+  resetBridgeHistory,
+  charOverlap,
   VALID_TYPES,
   VALID_POSITIONS,
   COLD_OPEN_PARTS,

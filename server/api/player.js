@@ -189,6 +189,7 @@ router.post('/pause', (req, res) => {
  */
 router.post('/skip', async (req, res) => {
   const broadcast = req.app.get('broadcast');
+  const { bridgePlayed } = req.body || {};
 
   try {
     const next = state.shiftQueue();
@@ -214,18 +215,29 @@ router.post('/skip', async (req, res) => {
       let transitionStyle = next.transitionStyle || meta?.transitionStyle || 'outro';
       let fillerData = null;
 
-      // Check for pre-generated bridge segment
-      const allSegs = state.getAllSegments();
-      let bridgeSeg = null;
-      if (allSegs.length > 0) {
-        bridgeSeg = allSegs.find(s => s.type === 'bridge' && s.ttsStatus === 'ready');
-      }
+      // If bridge was already played during outro on client, consume and skip it
+      if (bridgePlayed) {
+        const allSegs = state.getAllSegments();
+        const consumedBridge = allSegs.find(s => s.type === 'bridge' && s.ttsStatus === 'ready');
+        if (consumedBridge) {
+          state.removeSegment(`${consumedBridge.position}:${consumedBridge.anchorTrackIndex}`);
+          logger.info('PLAYER', 'Bridge already played during outro, consuming segment');
+        }
+        // No TTS attached — bridge was already heard
+      } else {
+        // Check for pre-generated bridge segment
+        const allSegs = state.getAllSegments();
+        let bridgeSeg = null;
+        if (allSegs.length > 0) {
+          bridgeSeg = allSegs.find(s => s.type === 'bridge' && s.ttsStatus === 'ready');
+        }
 
-      if (bridgeSeg && bridgeSeg.ttsUrl) {
-        // Use pre-generated bridge segment and mark as consumed
-        state.removeSegment(`${bridgeSeg.position}:${bridgeSeg.anchorTrackIndex}`);
-        fillerData = { text: bridgeSeg.text, ttsUrl: bridgeSeg.ttsUrl, type: 'bridge' };
-        transitionStyle = bridgeSeg.transitionStyle || 'intro';
+        if (bridgeSeg && bridgeSeg.ttsUrl) {
+          // Use pre-generated bridge segment and mark as consumed
+          state.removeSegment(`${bridgeSeg.position}:${bridgeSeg.anchorTrackIndex}`);
+          fillerData = { text: bridgeSeg.text, ttsUrl: bridgeSeg.ttsUrl, type: 'bridge' };
+          transitionStyle = bridgeSeg.transitionStyle || 'intro';
+        }
       }
       // No segment available → silent transition (natural song-to-song flow)
 

@@ -15,10 +15,12 @@ ttsAudio.preload = 'auto';
 const DUCK_LEVEL = 0.15;    // Music volume multiplier while DJ speaks (15%)
 const FADE_MS = 600;        // Fade transition duration in ms
 const FADE_STEP = 30;       // Volume update interval in ms
+const SEGUE_LEAD_S = 15;    // Seconds before song end to start outro talk
 
 let _duckTimer = null;        // Active fade timer
 let _ducking = false;         // Whether music is currently ducked
 let _savedVolume = 0.5;       // User's volume before ducking
+let _outroTalkDone = false;   // Whether outro bridge talk was played for current song
 
 /**
  * Smoothly fade music volume down to duck level.
@@ -113,13 +115,26 @@ const useAppStore = create((set, get) => ({
     const { _audioInitialized } = get();
     if (_audioInitialized) return;
 
-    // Track progress
+    // Track progress + check segue window
     audio.addEventListener('timeupdate', () => {
       set({ progress: audio.currentTime, duration: audio.duration || 0 });
+
+      // Segue window: check if we should start outro talk
+      const remaining = (audio.duration || 0) - audio.currentTime;
+      if (remaining > 0 && remaining <= SEGUE_LEAD_S && !_outroTalkDone) {
+        get().trySegueOutro();
+      }
     });
 
     // Auto-skip when song ends (with optional afterTrack segment)
     audio.addEventListener('ended', () => {
+      // If outro talk was already played during segue window, skip directly
+      if (_outroTalkDone) {
+        _outroTalkDone = false;
+        get().skipNext(true);
+        return;
+      }
+
       const afterSeg = get().getAfterTrackSegment();
       if (afterSeg && afterSeg.ttsUrl) {
         // Phase 2: Play back_announce commentary, then skip to next track
@@ -245,6 +260,7 @@ const useAppStore = create((set, get) => ({
    * @param {string} [mode='intro'] - 'intro' or 'outro'
    */
   playWithTTS: (ttsUrl, trackUrl, trackInfo, mode = 'intro') => {
+    _outroTalkDone = false;
     if (ttsUrl) {
       get().initAudio();
       const vol = get().volume;
@@ -338,6 +354,7 @@ const useAppStore = create((set, get) => ({
    */
   playTrack: (url, trackInfo) => {
     get().initAudio();
+    _outroTalkDone = false;
 
     if (trackInfo) {
       set({ currentTrack: trackInfo });
@@ -384,8 +401,9 @@ const useAppStore = create((set, get) => ({
     set({ isPlaying: !isPlaying });
   },
 
-  skipNext: async () => {
+  skipNext: async (bridgePlayed = false) => {
     // Clean up ducking state on skip
+    _outroTalkDone = false;
     if (_ducking) {
       if (_duckTimer) clearInterval(_duckTimer);
       _ducking = false;
@@ -398,7 +416,7 @@ const useAppStore = create((set, get) => ({
       set({ isSpeaking: false, isDucking: false });
     }
     try {
-      const res = await api.post('/api/player/skip');
+      const res = await api.post('/api/player/skip', { bridgePlayed });
       if (res.data.nowPlaying?.url) {
         const np = res.data.nowPlaying;
         get().playTrack(np.url, {
@@ -417,6 +435,7 @@ const useAppStore = create((set, get) => ({
   },
 
   skipPrev: () => {
+    _outroTalkDone = false;
     // Restart current track if progress > 3s, otherwise go to prev
     if (audio.currentTime > 3) {
       audio.currentTime = 0;
@@ -471,10 +490,22 @@ const useAppStore = create((set, get) => ({
    * Returns the segment or null.
    */
   getAfterTrackSegment: () => {
-    const { pendingSegments } = get();
-    return pendingSegments.find(
+    const { pendingSegments, currentTrack } = get();
+    const candidates = pendingSegments.filter(
       s => (s.position === 'after_track' || s.type === 'back_announce') && s.ttsUrl && s.ttsStatus === 'ready'
-    ) || null;
+    );
+    if (candidates.length === 0) return null;
+    // If metadata has prevSong info, match against current track to avoid playing wrong segment
+    if (currentTrack) {
+      const matched = candidates.find(s => {
+        if (!s.metadata?.prevSong) return true; // No metadata, accept as candidate
+        const segName = (s.metadata.prevSong.name || '').toLowerCase();
+        const curName = (currentTrack.trackName || '').toLowerCase();
+        return segName && curName && segName === curName;
+      });
+      return matched || candidates[0];
+    }
+    return candidates[0];
   },
 
   /**
@@ -483,6 +514,101 @@ const useAppStore = create((set, get) => ({
   removeSegment: (segmentId) => {
     const { pendingSegments } = get();
     set({ pendingSegments: pendingSegments.filter(s => s.id !== segmentId) });
+  },
+
+  /**
+   * Find a ready bridge segment for the current song gap.
+   * Matches by prevSong metadata against the current track.
+   * Returns the segment or null.
+   */
+  getBridgeSegment: () => {
+    const { pendingSegments, currentTrack } = get();
+    const bridges = pendingSegments.filter(
+      s => s.type === 'bridge' && s.ttsUrl && s.ttsStatus === 'ready'
+    );
+    if (bridges.length === 0) return null;
+    if (currentTrack) {
+      const matched = bridges.find(s => {
+        if (!s.metadata?.prevSong) return true;
+        const segName = (s.metadata.prevSong.name || '').toLowerCase();
+        const curName = (currentTrack.trackName || '').toLowerCase();
+        return segName && curName && segName === curName;
+      });
+      return matched || null;
+    }
+    return null;
+  },
+
+  /**
+   * Try to start outro talk if in the segue window and a bridge segment is ready.
+   * Called from timeupdate handler and segment-ready WebSocket handler.
+   */
+  trySegueOutro: () => {
+    if (_outroTalkDone || get().isSpeaking) return;
+
+    const remaining = (audio.duration || 0) - audio.currentTime;
+    if (remaining > SEGUE_LEAD_S || remaining <= 0) return;
+    if (!audio.src || audio.paused) return;
+
+    const bridge = get().getBridgeSegment();
+    if (!bridge) return;
+
+    get()._startOutroTalk(bridge);
+  },
+
+  /**
+   * Play bridge TTS over the ducked outro of the current song.
+   * When TTS ends, fade music up and skip to next track.
+   * @param {object} bridge - The bridge segment with ttsUrl
+   */
+  _startOutroTalk: (bridge) => {
+    _outroTalkDone = true;
+    get().removeSegment(bridge.id);
+    set({ isSpeaking: true, isDucking: true });
+
+    _savedVolume = get().volume;
+    _duckDown();
+    set({ djMessage: bridge.text });
+
+    const cleanup = () => {
+      ttsAudio.removeEventListener('ended', onEnded);
+      ttsAudio.removeEventListener('error', onError);
+    };
+
+    const finishTransition = () => {
+      // Clear any ongoing fade, restore volume immediately, then skip
+      if (_duckTimer) {
+        clearInterval(_duckTimer);
+        _duckTimer = null;
+      }
+      _ducking = false;
+      audio.volume = _savedVolume;
+      set({ isSpeaking: false, isDucking: false });
+      get().skipNext(true);
+    };
+
+    const onEnded = () => {
+      cleanup();
+      finishTransition();
+    };
+
+    const onError = () => {
+      cleanup();
+      finishTransition();
+    };
+
+    ttsAudio.addEventListener('ended', onEnded);
+    ttsAudio.addEventListener('error', onError);
+
+    ttsAudio.src = bridge.ttsUrl;
+    ttsAudio.volume = get().volume;
+    ttsAudio.play().catch(() => {
+      cleanup();
+      _outroTalkDone = false;
+      _ducking = false;
+      audio.volume = _savedVolume;
+      set({ isSpeaking: false, isDucking: false });
+    });
   },
 
   /**

@@ -404,15 +404,21 @@ class Scheduler {
                 };
 
                 // Refill path: no Brain rhythm decisions available
-                // Deterministic rule: same artist → silence, else → shallow bridge
+                // Deterministic rules:
+                //   - same artist → silence
+                //   - night (23:00-06:00) → silence
+                //   - otherwise → bridge
                 const sameArtist = prev.artist && next.artist &&
                   prev.artist.toLowerCase() === next.artist.toLowerCase();
+                const hour = new Date().getHours();
+                const isNight = hour >= 23 || hour < 6;
 
-                if (sameArtist) {
-                  const silenceSeg = segmentEngine.buildSilenceSegment(i, 'same_artist_refill', `refill${payload.batchId}`);
+                if (sameArtist || isNight) {
+                  const reason = sameArtist ? 'same_artist_refill' : 'night_refill';
+                  const silenceSeg = segmentEngine.buildSilenceSegment(i, reason, `refill${payload.batchId}`);
                   state.addSegment(`between_tracks:refill:${payload.batchId}:${i}`, silenceSeg);
                   broadcast({ type: 'segment-ready', data: silenceSeg });
-                  logger.info('SCHEDULER', `Bridge[${i}] → silence (same_artist_refill)`);
+                  logger.info('SCHEDULER', `Bridge[${i}] → silence (${reason})`);
                 } else {
                   const bridgeInfo = await segmentEngine.generateBridgeLLM(prev, next, deepseek, {
                     bridgeContext,

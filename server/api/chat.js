@@ -558,9 +558,46 @@ router.post('/', async (req, res) => {
 
               // Resolve cold_open segment (opening narration before first song)
               let coldOpenSeg = null;
-              if (normalizedSegments.length > 0) {
-                coldOpenSeg = normalizedSegments.find(s => s.type === 'cold_open');
-                if (coldOpenSeg && coldOpenSeg.text) {
+              const brainColdOpen = normalizedSegments.find(s => s.type === 'cold_open');
+
+              if (brainColdOpen && brainColdOpen.text) {
+                // Brain provided cold_open — clean the text
+                const cleaned = (brainColdOpen.text || '')
+                  .replace(/^["'"「『【《\s]+/, '')
+                  .replace(/["'"」』】》\s]+$/, '')
+                  .replace(/```[\s\S]*```/g, '')
+                  .trim();
+                if (cleaned) {
+                  coldOpenSeg = { ...brainColdOpen, text: cleaned };
+                  await segmentEngine.resolveSegmentTTS(coldOpenSeg);
+                  state.addSegment(`before_track:0`, coldOpenSeg);
+                }
+              }
+
+              if (!coldOpenSeg || !coldOpenSeg.ttsUrl) {
+                // Fallback: generate cold_open from first resolved track
+                const firstTrackMeta = state.getTrackMeta(first.track_id);
+                const firstSongInfo = {
+                  name: firstTrackMeta?.track_name || first.track_name,
+                  artist: firstTrackMeta?.artist || first.artist,
+                  tags: firstTrackMeta?.tags || '',
+                };
+                const bridgeContext = personaLoader.buildBridgeContext();
+                const coldOpenResult = await segmentEngine.generateColdOpen(
+                  firstSongInfo, brain.deepseek, { bridgeContext }
+                );
+                if (coldOpenResult.text) {
+                  coldOpenSeg = {
+                    id: 'seg:cold_open:0:gen',
+                    type: 'cold_open',
+                    position: 'before_track',
+                    anchorTrackIndex: 0,
+                    text: coldOpenResult.text,
+                    ttsUrl: null,
+                    ttsStatus: 'pending',
+                    transitionStyle: 'none',
+                    metadata: { source: coldOpenResult.source },
+                  };
                   await segmentEngine.resolveSegmentTTS(coldOpenSeg);
                   state.addSegment(`before_track:0`, coldOpenSeg);
                 }

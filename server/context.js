@@ -145,28 +145,6 @@ async function assemble({ userInput, triggerType = 'chat' }) {
 }
 
 /**
- * Build the full prompt string from context pieces
- */
-function buildPrompt(context) {
-  const sections = [
-    `# System\n${context.systemPrompt}`,
-    `# 用户品味与作息\n${context.userCorpus}`,
-    `# 当前环境\n${context.environment}`,
-    `# 记忆\n${context.memory}`,
-    `# 用户输入\n${context.userInput}`,
-    `# 触发方式\n${context.executionTrace.triggerType}`,
-    '',
-    '# 指令',
-    '基于以上所有信息，请返回 JSON 格式的歌曲推荐。',
-    'play 数组中填入网易云歌曲 ID（字符串），推荐 10-20 首。',
-    'say 字段为 DJ 的自然语言串词（可为 null）。',
-    '严格返回 JSON，不要包含其他内容。',
-  ];
-
-  return sections.join('\n\n');
-}
-
-/**
  * Generate human-readable time description
  */
 function getTimeDescription(date) {
@@ -189,7 +167,6 @@ function getTimeDescription(date) {
 
 module.exports = {
   assemble,
-  buildPrompt,
   loadSystemPrompt,
   loadUserCorpus,
 };

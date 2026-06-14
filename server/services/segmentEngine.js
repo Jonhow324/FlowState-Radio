@@ -4,7 +4,7 @@
 
 const tts = require('../tts');
 const logger = require('../utils/logger');
-const personaLoader = require('./personaLoader');
+const promptBuilders = require('../promptBuilders');
 
 // ── Segment Types ─────────────────────────────────────────────
 const VALID_TYPES = new Set([
@@ -203,10 +203,11 @@ async function generateBridgeLLM(prevSong, nextSong, deepseek, options = {}) {
 
   const isDeep = depth === 'deep';
 
-  // Build enriched prompts
+  // Build prompts using dedicated builder (lean context: persona + time + recent plays + song pair)
   const bridgeContext = options.bridgeContext || null;
-  const systemPrompt = _buildBridgeSystemPrompt(depth, bridgeContext);
-  const userPrompt = _buildBridgeUserPrompt(prevSong, nextSong, bridgeContext);
+  const { systemPrompt, userPrompt } = promptBuilders.buildBridgePrompt(
+    prevSong, nextSong, depth, bridgeContext
+  );
 
   const rawOptions = {
     temperature: options.temperature ?? (isDeep ? 0.85 : 0.9),
@@ -323,94 +324,6 @@ function charOverlap(a, b) {
   return matches / shorter.length;
 }
 
-/**
- * Build the system prompt for bridge generation.
- * Injects persona snippet for consistent DJ character.
- *
- * @param {'shallow'|'deep'} depth
- * @param {object} [bridgeContext] - Context from personaLoader.buildBridgeContext()
- * @returns {string} System prompt
- */
-function _buildBridgeSystemPrompt(depth, bridgeContext) {
-  const persona = bridgeContext?.persona || personaLoader.getBridgePersona();
-  const timeContext = bridgeContext?.timeContext || personaLoader.getTimeContext();
-
-  if (depth === 'deep') {
-    return [
-      persona,
-      '',
-      '你觉得下一首歌特别契合当下的氛围，想和听众多聊几句。',
-      '',
-      '请从以下角度中自然选择一个展开（不要列出角度名称，直接说）：',
-      '1. 这首歌或歌手背后的创作故事、有趣轶事',
-      '2. 音乐中值得细细品味的细节（某段旋律、编曲、歌词的妙处）',
-      '3. 这首歌带来的情绪共鸣，为什么此刻听它格外动人',
-      '4. 歌曲和当下场景/时间/心境的独特联系',
-      '',
-      '要求：',
-      '- 2-4句话（60-200字），像跟老朋友聊天',
-      '- 要有具体的细节，不要空泛的赞美或套话',
-      '- 不要引号、不要前缀、不要列点',
-      '- 第一句话要自然衔接上一首歌，后面的话展开聊下一首',
-      '- 语气真诚，像真的在分享自己对音乐的感受',
-      '',
-      timeContext,
-    ].join('\n');
-  }
-
-  // Shallow
-  return [
-    persona,
-    '',
-    '你的任务是用一句话串联两首歌之间的过渡，让听众觉得音乐在自然流动。',
-    '',
-    '要求：',
-    '- 只输出一句话（15-60字），不要引号、不要前缀',
-    '- 可以提到歌名、歌手、情绪、风格上的联系',
-    '- 语气像朋友在耳边轻声说话',
-    '- 不要用"让我们"、"接下来"这类套话开头',
-    '',
-    timeContext,
-  ].join('\n');
-}
-
-/**
- * Build user prompt with song context + rich layers for bridge generation.
- *
- * @param {object} prevSong - { name, artist, tags? }
- * @param {object} nextSong - { name, artist, tags? }
- * @param {object} [bridgeContext] - Context from personaLoader.buildBridgeContext()
- * @returns {string}
- */
-function _buildBridgeUserPrompt(prevSong, nextSong, bridgeContext) {
-  const prevName = prevSong.name || prevSong.trackName || '未知';
-  const prevArtist = prevSong.artist || '未知';
-  const nextName = nextSong.name || nextSong.trackName || '未知';
-  const nextArtist = nextSong.artist || '未知';
-
-  const parts = [];
-
-  // Layer 1: Recent play history (avoid repetition)
-  if (bridgeContext?.recentPlays) {
-    parts.push(bridgeContext.recentPlays);
-  }
-
-  // Layer 2: User taste (helps pick relevant angles)
-  if (bridgeContext?.userTaste) {
-    parts.push(bridgeContext.userTaste);
-  }
-
-  // Layer 3: Song pair (core context)
-  if (parts.length > 0) parts.push(''); // Blank line separator
-
-  parts.push(`上一首：${prevArtist} -《${prevName}》`);
-  if (prevSong.tags) parts.push(`标签：${prevSong.tags}`);
-  parts.push(`下一首：${nextArtist} -《${nextName}》`);
-  if (nextSong.tags) parts.push(`标签：${nextSong.tags}`);
-
-  return parts.join('\n');
-}
-
 // ── Cold Open Generation (Narrative Arc) ─────────────────────
 
 /**
@@ -440,42 +353,8 @@ async function generateColdOpen(firstSong, deepseek, options = {}) {
     return { text: null, parts: [], source: 'none' };
   }
 
-  const bridgeContext = options.bridgeContext || personaLoader.buildBridgeContext();
-  const persona = bridgeContext.persona || personaLoader.getBridgePersona();
-  const timeContext = bridgeContext.timeContext || personaLoader.getTimeContext();
-  const recentPlays = bridgeContext.recentPlays || '';
-
-  const songName = firstSong.name || firstSong.trackName || '第一首歌';
-  const songArtist = firstSong.artist || '';
-
-  const systemPrompt = [
-    persona,
-    '',
-    '你正在开启今天的电台节目。用一段开场白为听众设定氛围。',
-    '',
-    '叙事弧（自然融入，不要刻意标注）：',
-    '- 定场：描述当下的时间、空间、氛围',
-    '- 情感：触及听众此刻可能的状态或心情',
-    '- 转折：从日常引向音乐',
-    '- 画面：一个具体的感官细节',
-    '- 邀请：让听众觉得这段开场是为他说的',
-    '',
-    '要求：',
-    '- 2-4句话（90-220字）',
-    '- 自然衔接第一首歌，让听众觉得音乐是开场的延续',
-    '- 不要播音腔、不要"大家好欢迎来到"',
-    '- 不要列点、不要标注叙事弧名称',
-    '',
-    timeContext,
-  ].join('\n');
-
-  const userParts = [];
-  if (recentPlays) userParts.push(recentPlays);
-  userParts.push('');
-  userParts.push(`即将播出的第一首歌：${songArtist ? songArtist + ' - ' : ''}《${songName}》`);
-  if (firstSong.tags) userParts.push(`标签：${firstSong.tags}`);
-
-  const userPrompt = userParts.join('\n');
+  const bridgeContext = options.bridgeContext || null;
+  const { systemPrompt, userPrompt } = promptBuilders.buildColdOpenPrompt(firstSong, bridgeContext);
 
   try {
     const rawText = await deepseek.rawChat(systemPrompt, userPrompt, {

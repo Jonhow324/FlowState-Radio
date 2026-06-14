@@ -1,0 +1,717 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Claudio 音乐风格分析</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#0d1117; color:#c9d1d9; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; padding:40px; }
+  h1 { color:#58a6ff; margin-bottom:8px; }
+  h2 { color:#58a6ff; margin:32px 0 16px; border-bottom:1px solid #21262d; padding-bottom:8px; }
+  .summary { color:#8b949e; margin-bottom:32px; }
+  .card { background:#161b22; border:1px solid #21262d; border-radius:8px; padding:20px; margin-bottom:24px; }
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:24px; }
+  @media(max-width:900px){ .grid{grid-template-columns:1fr;} }
+  .stats { display:flex; gap:24px; flex-wrap:wrap; margin-bottom:24px; }
+  .stat { background:#161b22; border:1px solid #21262d; border-radius:8px; padding:16px 24px; text-align:center; }
+  .stat-value { font-size:28px; font-weight:bold; color:#58a6ff; }
+  .stat-label { font-size:12px; color:#8b949e; margin-top:4px; }
+</style>
+</head>
+<body>
+
+<h1>🎵 Claudio 音乐风格全景</h1>
+<div class="summary">基于 531 首歌曲的标签、风格、情感分析</div>
+
+<div class="stats">
+  <div class="stat"><div class="stat-value">531</div><div class="stat-label">总歌曲数</div></div>
+  <div class="stat"><div class="stat-value">373</div><div class="stat-label">风格标签数</div></div>
+  <div class="stat"><div class="stat-value">449</div><div class="stat-label">艺人总数</div></div>
+  <div class="stat"><div class="stat-value">10</div><div class="stat-label">风格大类</div></div>
+</div>
+
+<div class="grid">
+  <div class="card">
+    <h2>📊 风格大类分布</h2>
+    <div style="display:flex;align-items:center;margin:4px 0;font-size:13px">
+        <span style="width:80px;text-align:right;margin-right:12px;color:#aaa;flex-shrink:0">摇滚/独立</span>
+        <span style="color:#FF6B6B;margin-right:8px;white-space:pre;font-family:monospace">██████████████████████████████</span>
+        <span style="color:#ccc;white-space:nowrap">442 (83.2%)</span>
+      </div>
+<div style="display:flex;align-items:center;margin:4px 0;font-size:13px">
+        <span style="width:80px;text-align:right;margin-right:12px;color:#aaa;flex-shrink:0">说唱</span>
+        <span style="color:#4ECDC4;margin-right:8px;white-space:pre;font-family:monospace">███████</span>
+        <span style="color:#ccc;white-space:nowrap">104 (19.6%)</span>
+      </div>
+<div style="display:flex;align-items:center;margin:4px 0;font-size:13px">
+        <span style="width:80px;text-align:right;margin-right:12px;color:#aaa;flex-shrink:0">电子/氛围</span>
+        <span style="color:#45B7D1;margin-right:8px;white-space:pre;font-family:monospace">███████</span>
+        <span style="color:#ccc;white-space:nowrap">100 (18.8%)</span>
+      </div>
+<div style="display:flex;align-items:center;margin:4px 0;font-size:13px">
+        <span style="width:80px;text-align:right;margin-right:12px;color:#aaa;flex-shrink:0">流行</span>
+        <span style="color:#96CEB4;margin-right:8px;white-space:pre;font-family:monospace">██████</span>
+        <span style="color:#ccc;white-space:nowrap">84 (15.8%)</span>
+      </div>
+<div style="display:flex;align-items:center;margin:4px 0;font-size:13px">
+        <span style="width:80px;text-align:right;margin-right:12px;color:#aaa;flex-shrink:0">爵士</span>
+        <span style="color:#FFEAA7;margin-right:8px;white-space:pre;font-family:monospace">█████</span>
+        <span style="color:#ccc;white-space:nowrap">72 (13.6%)</span>
+      </div>
+<div style="display:flex;align-items:center;margin:4px 0;font-size:13px">
+        <span style="width:80px;text-align:right;margin-right:12px;color:#aaa;flex-shrink:0">民谣</span>
+        <span style="color:#DDA0DD;margin-right:8px;white-space:pre;font-family:monospace">████</span>
+        <span style="color:#ccc;white-space:nowrap">61 (11.5%)</span>
+      </div>
+<div style="display:flex;align-items:center;margin:4px 0;font-size:13px">
+        <span style="width:80px;text-align:right;margin-right:12px;color:#aaa;flex-shrink:0">R&B/Soul</span>
+        <span style="color:#98D8C8;margin-right:8px;white-space:pre;font-family:monospace">██</span>
+        <span style="color:#ccc;white-space:nowrap">35 (6.6%)</span>
+      </div>
+<div style="display:flex;align-items:center;margin:4px 0;font-size:13px">
+        <span style="width:80px;text-align:right;margin-right:12px;color:#aaa;flex-shrink:0">世界音乐</span>
+        <span style="color:#F7DC6F;margin-right:8px;white-space:pre;font-family:monospace">█</span>
+        <span style="color:#ccc;white-space:nowrap">18 (3.4%)</span>
+      </div>
+<div style="display:flex;align-items:center;margin:4px 0;font-size:13px">
+        <span style="width:80px;text-align:right;margin-right:12px;color:#aaa;flex-shrink:0">古典/新世纪</span>
+        <span style="color:#BB8FCE;margin-right:8px;white-space:pre;font-family:monospace">█</span>
+        <span style="color:#ccc;white-space:nowrap">15 (2.8%)</span>
+      </div>
+<div style="display:flex;align-items:center;margin:4px 0;font-size:13px">
+        <span style="width:80px;text-align:right;margin-right:12px;color:#aaa;flex-shrink:0">实验</span>
+        <span style="color:#85C1E9;margin-right:8px;white-space:pre;font-family:monospace">█</span>
+        <span style="color:#ccc;white-space:nowrap">10 (1.9%)</span>
+      </div>
+  </div>
+  <div class="card">
+    <h2>🏷️ 细分标签 TOP 20</h2>
+    <div style="display:flex;align-items:center;margin:4px 0;font-size:13px">
+      <span style="width:80px;text-align:right;margin-right:12px;color:#aaa;flex-shrink:0">Indie</span>
+      <span style="color:#FF6B6B;margin-right:8px;white-space:pre;font-family:monospace">██████████████████████████████</span>
+      <span style="color:#ccc;white-space:nowrap">164 (30.9%)</span>
+    </div>
+<div style="display:flex;align-items:center;margin:4px 0;font-size:13px">
+      <span style="width:80px;text-align:right;margin-right:12px;color:#aaa;flex-shrink:0">Alternative</span>
+      <span style="color:#4ECDC4;margin-right:8px;white-space:pre;font-family:monospace">████████████████████</span>
+      <span style="color:#ccc;white-space:nowrap">110 (20.7%)</span>
+    </div>
+<div style="display:flex;align-items:center;margin:4px 0;font-size:13px">
+      <span style="width:80px;text-align:right;margin-right:12px;color:#aaa;flex-shrink:0">Rock</span>
+      <span style="color:#45B7D1;margin-right:8px;white-space:pre;font-family:monospace">████████████</span>
+      <span style="color:#ccc;white-space:nowrap">63 (11.9%)</span>
+    </div>
+<div style="display:flex;align-items:center;margin:4px 0;font-size:13px">
+      <span style="width:80px;text-align:right;margin-right:12px;color:#aaa;flex-shrink:0">Pop</span>
+      <span style="color:#96CEB4;margin-right:8px;white-space:pre;font-family:monospace">██████████</span>
+      <span style="color:#ccc;white-space:nowrap">54 (10.2%)</span>
+    </div>
+<div style="display:flex;align-items:center;margin:4px 0;font-size:13px">
+      <span style="width:80px;text-align:right;margin-right:12px;color:#aaa;flex-shrink:0">Jazz</span>
+      <span style="color:#FFEAA7;margin-right:8px;white-space:pre;font-family:monospace">█████████</span>
+      <span style="color:#ccc;white-space:nowrap">48 (9.0%)</span>
+    </div>
+<div style="display:flex;align-items:center;margin:4px 0;font-size:13px">
+      <span style="width:80px;text-align:right;margin-right:12px;color:#aaa;flex-shrink:0">Folk</span>
+      <span style="color:#DDA0DD;margin-right:8px;white-space:pre;font-family:monospace">████████</span>
+      <span style="color:#ccc;white-space:nowrap">42 (7.9%)</span>
+    </div>
+<div style="display:flex;align-items:center;margin:4px 0;font-size:13px">
+      <span style="width:80px;text-align:right;margin-right:12px;color:#aaa;flex-shrink:0">说唱</span>
+      <span style="color:#98D8C8;margin-right:8px;white-space:pre;font-family:monospace">███████</span>
+      <span style="color:#ccc;white-space:nowrap">39 (7.3%)</span>
+    </div>
+<div style="display:flex;align-items:center;margin:4px 0;font-size:13px">
+      <span style="width:80px;text-align:right;margin-right:12px;color:#aaa;flex-shrink:0">Hip-Hop</span>
+      <span style="color:#F7DC6F;margin-right:8px;white-space:pre;font-family:monospace">███████</span>
+      <span style="color:#ccc;white-space:nowrap">38 (7.2%)</span>
+    </div>
+<div style="display:flex;align-items:center;margin:4px 0;font-size:13px">
+      <span style="width:80px;text-align:right;margin-right:12px;color:#aaa;flex-shrink:0">Ambient</span>
+      <span style="color:#BB8FCE;margin-right:8px;white-space:pre;font-family:monospace">██████</span>
+      <span style="color:#ccc;white-space:nowrap">33 (6.2%)</span>
+    </div>
+<div style="display:flex;align-items:center;margin:4px 0;font-size:13px">
+      <span style="width:80px;text-align:right;margin-right:12px;color:#aaa;flex-shrink:0">浪漫</span>
+      <span style="color:#85C1E9;margin-right:8px;white-space:pre;font-family:monospace">█████</span>
+      <span style="color:#ccc;white-space:nowrap">27 (5.1%)</span>
+    </div>
+<div style="display:flex;align-items:center;margin:4px 0;font-size:13px">
+      <span style="width:80px;text-align:right;margin-right:12px;color:#aaa;flex-shrink:0">台湾独立</span>
+      <span style="color:#F8C471;margin-right:8px;white-space:pre;font-family:monospace">█████</span>
+      <span style="color:#ccc;white-space:nowrap">27 (5.1%)</span>
+    </div>
+<div style="display:flex;align-items:center;margin:4px 0;font-size:13px">
+      <span style="width:80px;text-align:right;margin-right:12px;color:#aaa;flex-shrink:0">流行</span>
+      <span style="color:#82E0AA;margin-right:8px;white-space:pre;font-family:monospace">█████</span>
+      <span style="color:#ccc;white-space:nowrap">26 (4.9%)</span>
+    </div>
+<div style="display:flex;align-items:center;margin:4px 0;font-size:13px">
+      <span style="width:80px;text-align:right;margin-right:12px;color:#aaa;flex-shrink:0">电子</span>
+      <span style="color:#F1948A;margin-right:8px;white-space:pre;font-family:monospace">█████</span>
+      <span style="color:#ccc;white-space:nowrap">25 (4.7%)</span>
+    </div>
+<div style="display:flex;align-items:center;margin:4px 0;font-size:13px">
+      <span style="width:80px;text-align:right;margin-right:12px;color:#aaa;flex-shrink:0">Chillhop</span>
+      <span style="color:#85929E;margin-right:8px;white-space:pre;font-family:monospace">███</span>
+      <span style="color:#ccc;white-space:nowrap">17 (3.2%)</span>
+    </div>
+<div style="display:flex;align-items:center;margin:4px 0;font-size:13px">
+      <span style="width:80px;text-align:right;margin-right:12px;color:#aaa;flex-shrink:0">R&B</span>
+      <span style="color:#AED6F1;margin-right:8px;white-space:pre;font-family:monospace">███</span>
+      <span style="color:#ccc;white-space:nowrap">16 (3.0%)</span>
+    </div>
+<div style="display:flex;align-items:center;margin:4px 0;font-size:13px">
+      <span style="width:80px;text-align:right;margin-right:12px;color:#aaa;flex-shrink:0">Instrumental</span>
+      <span style="color:#FF6B6B;margin-right:8px;white-space:pre;font-family:monospace">███</span>
+      <span style="color:#ccc;white-space:nowrap">16 (3.0%)</span>
+    </div>
+<div style="display:flex;align-items:center;margin:4px 0;font-size:13px">
+      <span style="width:80px;text-align:right;margin-right:12px;color:#aaa;flex-shrink:0">World</span>
+      <span style="color:#4ECDC4;margin-right:8px;white-space:pre;font-family:monospace">███</span>
+      <span style="color:#ccc;white-space:nowrap">15 (2.8%)</span>
+    </div>
+<div style="display:flex;align-items:center;margin:4px 0;font-size:13px">
+      <span style="width:80px;text-align:right;margin-right:12px;color:#aaa;flex-shrink:0">Rap</span>
+      <span style="color:#45B7D1;margin-right:8px;white-space:pre;font-family:monospace">███</span>
+      <span style="color:#ccc;white-space:nowrap">14 (2.6%)</span>
+    </div>
+<div style="display:flex;align-items:center;margin:4px 0;font-size:13px">
+      <span style="width:80px;text-align:right;margin-right:12px;color:#aaa;flex-shrink:0">民谣</span>
+      <span style="color:#96CEB4;margin-right:8px;white-space:pre;font-family:monospace">███</span>
+      <span style="color:#ccc;white-space:nowrap">14 (2.6%)</span>
+    </div>
+<div style="display:flex;align-items:center;margin:4px 0;font-size:13px">
+      <span style="width:80px;text-align:right;margin-right:12px;color:#aaa;flex-shrink:0">Ballad</span>
+      <span style="color:#FFEAA7;margin-right:8px;white-space:pre;font-family:monospace">██</span>
+      <span style="color:#ccc;white-space:nowrap">13 (2.4%)</span>
+    </div>
+  </div>
+</div>
+
+<div class="grid">
+  <div class="card">
+    <h2>😊 情感分布</h2>
+    <div style="display:flex;align-items:center;margin:4px 0;font-size:13px">
+      <span style="width:80px;text-align:right;margin-right:12px;color:#aaa;flex-shrink:0">浪漫</span>
+      <span style="color:#FF6B6B;margin-right:8px;white-space:pre;font-family:monospace">██████████████████████████████</span>
+      <span style="color:#ccc;white-space:nowrap">72 (13.6%)</span>
+    </div>
+<div style="display:flex;align-items:center;margin:4px 0;font-size:13px">
+      <span style="width:80px;text-align:right;margin-right:12px;color:#aaa;flex-shrink:0">欢快</span>
+      <span style="color:#4ECDC4;margin-right:8px;white-space:pre;font-family:monospace">█████████████</span>
+      <span style="color:#ccc;white-space:nowrap">30 (5.6%)</span>
+    </div>
+<div style="display:flex;align-items:center;margin:4px 0;font-size:13px">
+      <span style="width:80px;text-align:right;margin-right:12px;color:#aaa;flex-shrink:0">热血</span>
+      <span style="color:#45B7D1;margin-right:8px;white-space:pre;font-family:monospace">████████████</span>
+      <span style="color:#ccc;white-space:nowrap">28 (5.3%)</span>
+    </div>
+<div style="display:flex;align-items:center;margin:4px 0;font-size:13px">
+      <span style="width:80px;text-align:right;margin-right:12px;color:#aaa;flex-shrink:0">平静</span>
+      <span style="color:#96CEB4;margin-right:8px;white-space:pre;font-family:monospace">██████████</span>
+      <span style="color:#ccc;white-space:nowrap">24 (4.5%)</span>
+    </div>
+<div style="display:flex;align-items:center;margin:4px 0;font-size:13px">
+      <span style="width:80px;text-align:right;margin-right:12px;color:#aaa;flex-shrink:0">梦幻</span>
+      <span style="color:#FFEAA7;margin-right:8px;white-space:pre;font-family:monospace">███████</span>
+      <span style="color:#ccc;white-space:nowrap">17 (3.2%)</span>
+    </div>
+<div style="display:flex;align-items:center;margin:4px 0;font-size:13px">
+      <span style="width:80px;text-align:right;margin-right:12px;color:#aaa;flex-shrink:0">忧伤</span>
+      <span style="color:#DDA0DD;margin-right:8px;white-space:pre;font-family:monospace">███████</span>
+      <span style="color:#ccc;white-space:nowrap">16 (3.0%)</span>
+    </div>
+<div style="display:flex;align-items:center;margin:4px 0;font-size:13px">
+      <span style="width:80px;text-align:right;margin-right:12px;color:#aaa;flex-shrink:0">暗黑</span>
+      <span style="color:#98D8C8;margin-right:8px;white-space:pre;font-family:monospace">███</span>
+      <span style="color:#ccc;white-space:nowrap">6 (1.1%)</span>
+    </div>
+  </div>
+  <div class="card">
+    <h2>🎤 高频艺人 TOP 20</h2>
+    <div style="display:flex;align-items:center;margin:4px 0;font-size:13px">
+      <span style="width:80px;text-align:right;margin-right:12px;color:#aaa;flex-shrink:0">Nujabes</span>
+      <span style="color:#FF6B6B;margin-right:8px;white-space:pre;font-family:monospace">██████████████████████████████</span>
+      <span style="color:#ccc;white-space:nowrap">9 (1.7%)</span>
+    </div>
+<div style="display:flex;align-items:center;margin:4px 0;font-size:13px">
+      <span style="width:80px;text-align:right;margin-right:12px;color:#aaa;flex-shrink:0">蛋堡</span>
+      <span style="color:#4ECDC4;margin-right:8px;white-space:pre;font-family:monospace">███████████████████████</span>
+      <span style="color:#ccc;white-space:nowrap">7 (1.3%)</span>
+    </div>
+<div style="display:flex;align-items:center;margin:4px 0;font-size:13px">
+      <span style="width:80px;text-align:right;margin-right:12px;color:#aaa;flex-shrink:0">陈绮贞</span>
+      <span style="color:#45B7D1;margin-right:8px;white-space:pre;font-family:monospace">█████████████</span>
+      <span style="color:#ccc;white-space:nowrap">4 (0.8%)</span>
+    </div>
+<div style="display:flex;align-items:center;margin:4px 0;font-size:13px">
+      <span style="width:80px;text-align:right;margin-right:12px;color:#aaa;flex-shrink:0">Lopu$</span>
+      <span style="color:#96CEB4;margin-right:8px;white-space:pre;font-family:monospace">█████████████</span>
+      <span style="color:#ccc;white-space:nowrap">4 (0.8%)</span>
+    </div>
+<div style="display:flex;align-items:center;margin:4px 0;font-size:13px">
+      <span style="width:80px;text-align:right;margin-right:12px;color:#aaa;flex-shrink:0">Gummy B</span>
+      <span style="color:#FFEAA7;margin-right:8px;white-space:pre;font-family:monospace">█████████████</span>
+      <span style="color:#ccc;white-space:nowrap">4 (0.8%)</span>
+    </div>
+<div style="display:flex;align-items:center;margin:4px 0;font-size:13px">
+      <span style="width:80px;text-align:right;margin-right:12px;color:#aaa;flex-shrink:0">Billie Eilish</span>
+      <span style="color:#DDA0DD;margin-right:8px;white-space:pre;font-family:monospace">██████████</span>
+      <span style="color:#ccc;white-space:nowrap">3 (0.6%)</span>
+    </div>
+<div style="display:flex;align-items:center;margin:4px 0;font-size:13px">
+      <span style="width:80px;text-align:right;margin-right:12px;color:#aaa;flex-shrink:0">A Tribe Called Quest</span>
+      <span style="color:#98D8C8;margin-right:8px;white-space:pre;font-family:monospace">██████████</span>
+      <span style="color:#ccc;white-space:nowrap">3 (0.6%)</span>
+    </div>
+<div style="display:flex;align-items:center;margin:4px 0;font-size:13px">
+      <span style="width:80px;text-align:right;margin-right:12px;color:#aaa;flex-shrink:0">Trent Dabbs</span>
+      <span style="color:#F7DC6F;margin-right:8px;white-space:pre;font-family:monospace">██████████</span>
+      <span style="color:#ccc;white-space:nowrap">3 (0.6%)</span>
+    </div>
+<div style="display:flex;align-items:center;margin:4px 0;font-size:13px">
+      <span style="width:80px;text-align:right;margin-right:12px;color:#aaa;flex-shrink:0">BoyWithUke</span>
+      <span style="color:#BB8FCE;margin-right:8px;white-space:pre;font-family:monospace">██████████</span>
+      <span style="color:#ccc;white-space:nowrap">3 (0.6%)</span>
+    </div>
+<div style="display:flex;align-items:center;margin:4px 0;font-size:13px">
+      <span style="width:80px;text-align:right;margin-right:12px;color:#aaa;flex-shrink:0">Summer Salt</span>
+      <span style="color:#85C1E9;margin-right:8px;white-space:pre;font-family:monospace">██████████</span>
+      <span style="color:#ccc;white-space:nowrap">3 (0.6%)</span>
+    </div>
+<div style="display:flex;align-items:center;margin:4px 0;font-size:13px">
+      <span style="width:80px;text-align:right;margin-right:12px;color:#aaa;flex-shrink:0">艾福杰尼</span>
+      <span style="color:#F8C471;margin-right:8px;white-space:pre;font-family:monospace">██████████</span>
+      <span style="color:#ccc;white-space:nowrap">3 (0.6%)</span>
+    </div>
+<div style="display:flex;align-items:center;margin:4px 0;font-size:13px">
+      <span style="width:80px;text-align:right;margin-right:12px;color:#aaa;flex-shrink:0">Frandé</span>
+      <span style="color:#82E0AA;margin-right:8px;white-space:pre;font-family:monospace">██████████</span>
+      <span style="color:#ccc;white-space:nowrap">3 (0.6%)</span>
+    </div>
+<div style="display:flex;align-items:center;margin:4px 0;font-size:13px">
+      <span style="width:80px;text-align:right;margin-right:12px;color:#aaa;flex-shrink:0">胡德夫</span>
+      <span style="color:#F1948A;margin-right:8px;white-space:pre;font-family:monospace">██████████</span>
+      <span style="color:#ccc;white-space:nowrap">3 (0.6%)</span>
+    </div>
+<div style="display:flex;align-items:center;margin:4px 0;font-size:13px">
+      <span style="width:80px;text-align:right;margin-right:12px;color:#aaa;flex-shrink:0">傻子与白痴</span>
+      <span style="color:#85929E;margin-right:8px;white-space:pre;font-family:monospace">██████████</span>
+      <span style="color:#ccc;white-space:nowrap">3 (0.6%)</span>
+    </div>
+<div style="display:flex;align-items:center;margin:4px 0;font-size:13px">
+      <span style="width:80px;text-align:right;margin-right:12px;color:#aaa;flex-shrink:0">卢广仲</span>
+      <span style="color:#AED6F1;margin-right:8px;white-space:pre;font-family:monospace">██████████</span>
+      <span style="color:#ccc;white-space:nowrap">3 (0.6%)</span>
+    </div>
+<div style="display:flex;align-items:center;margin:4px 0;font-size:13px">
+      <span style="width:80px;text-align:right;margin-right:12px;color:#aaa;flex-shrink:0">deca joins</span>
+      <span style="color:#FF6B6B;margin-right:8px;white-space:pre;font-family:monospace">██████████</span>
+      <span style="color:#ccc;white-space:nowrap">3 (0.6%)</span>
+    </div>
+<div style="display:flex;align-items:center;margin:4px 0;font-size:13px">
+      <span style="width:80px;text-align:right;margin-right:12px;color:#aaa;flex-shrink:0">草东没有派对</span>
+      <span style="color:#4ECDC4;margin-right:8px;white-space:pre;font-family:monospace">██████████</span>
+      <span style="color:#ccc;white-space:nowrap">3 (0.6%)</span>
+    </div>
+<div style="display:flex;align-items:center;margin:4px 0;font-size:13px">
+      <span style="width:80px;text-align:right;margin-right:12px;color:#aaa;flex-shrink:0">伍佰 & China Blue</span>
+      <span style="color:#45B7D1;margin-right:8px;white-space:pre;font-family:monospace">██████████</span>
+      <span style="color:#ccc;white-space:nowrap">3 (0.6%)</span>
+    </div>
+<div style="display:flex;align-items:center;margin:4px 0;font-size:13px">
+      <span style="width:80px;text-align:right;margin-right:12px;color:#aaa;flex-shrink:0">透明杂志</span>
+      <span style="color:#96CEB4;margin-right:8px;white-space:pre;font-family:monospace">██████████</span>
+      <span style="color:#ccc;white-space:nowrap">3 (0.6%)</span>
+    </div>
+<div style="display:flex;align-items:center;margin:4px 0;font-size:13px">
+      <span style="width:80px;text-align:right;margin-right:12px;color:#aaa;flex-shrink:0">苏打绿</span>
+      <span style="color:#FFEAA7;margin-right:8px;white-space:pre;font-family:monospace">██████████</span>
+      <span style="color:#ccc;white-space:nowrap">3 (0.6%)</span>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>📋 全部标签 (373)</h2>
+  <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:12px">
+    <span style="background:#21262d;color:#FF6B6B;padding:4px 12px;border-radius:12px;font-size:12px">Indie <span style="color:#8b949e">164</span></span>
+<span style="background:#21262d;color:#4ECDC4;padding:4px 12px;border-radius:12px;font-size:12px">Alternative <span style="color:#8b949e">110</span></span>
+<span style="background:#21262d;color:#45B7D1;padding:4px 12px;border-radius:12px;font-size:12px">Rock <span style="color:#8b949e">63</span></span>
+<span style="background:#21262d;color:#96CEB4;padding:4px 12px;border-radius:12px;font-size:12px">Pop <span style="color:#8b949e">54</span></span>
+<span style="background:#21262d;color:#FFEAA7;padding:4px 12px;border-radius:12px;font-size:12px">Jazz <span style="color:#8b949e">48</span></span>
+<span style="background:#21262d;color:#DDA0DD;padding:4px 12px;border-radius:12px;font-size:12px">Folk <span style="color:#8b949e">42</span></span>
+<span style="background:#21262d;color:#98D8C8;padding:4px 12px;border-radius:12px;font-size:12px">说唱 <span style="color:#8b949e">39</span></span>
+<span style="background:#21262d;color:#F7DC6F;padding:4px 12px;border-radius:12px;font-size:12px">Hip-Hop <span style="color:#8b949e">38</span></span>
+<span style="background:#21262d;color:#BB8FCE;padding:4px 12px;border-radius:12px;font-size:12px">Ambient <span style="color:#8b949e">33</span></span>
+<span style="background:#21262d;color:#85C1E9;padding:4px 12px;border-radius:12px;font-size:12px">浪漫 <span style="color:#8b949e">27</span></span>
+<span style="background:#21262d;color:#F8C471;padding:4px 12px;border-radius:12px;font-size:12px">台湾独立 <span style="color:#8b949e">27</span></span>
+<span style="background:#21262d;color:#82E0AA;padding:4px 12px;border-radius:12px;font-size:12px">流行 <span style="color:#8b949e">26</span></span>
+<span style="background:#21262d;color:#F1948A;padding:4px 12px;border-radius:12px;font-size:12px">电子 <span style="color:#8b949e">25</span></span>
+<span style="background:#21262d;color:#85929E;padding:4px 12px;border-radius:12px;font-size:12px">Chillhop <span style="color:#8b949e">17</span></span>
+<span style="background:#21262d;color:#AED6F1;padding:4px 12px;border-radius:12px;font-size:12px">R&B <span style="color:#8b949e">16</span></span>
+<span style="background:#21262d;color:#FF6B6B;padding:4px 12px;border-radius:12px;font-size:12px">Instrumental <span style="color:#8b949e">16</span></span>
+<span style="background:#21262d;color:#4ECDC4;padding:4px 12px;border-radius:12px;font-size:12px">World <span style="color:#8b949e">15</span></span>
+<span style="background:#21262d;color:#45B7D1;padding:4px 12px;border-radius:12px;font-size:12px">Rap <span style="color:#8b949e">14</span></span>
+<span style="background:#21262d;color:#96CEB4;padding:4px 12px;border-radius:12px;font-size:12px">民谣 <span style="color:#8b949e">14</span></span>
+<span style="background:#21262d;color:#FFEAA7;padding:4px 12px;border-radius:12px;font-size:12px">Ballad <span style="color:#8b949e">13</span></span>
+<span style="background:#21262d;color:#DDA0DD;padding:4px 12px;border-radius:12px;font-size:12px">嘻哈 <span style="color:#8b949e">13</span></span>
+<span style="background:#21262d;color:#98D8C8;padding:4px 12px;border-radius:12px;font-size:12px">Shoegaze <span style="color:#8b949e">13</span></span>
+<span style="background:#21262d;color:#F7DC6F;padding:4px 12px;border-radius:12px;font-size:12px">深情 <span style="color:#8b949e">12</span></span>
+<span style="background:#21262d;color:#BB8FCE;padding:4px 12px;border-radius:12px;font-size:12px">Music <span style="color:#8b949e">12</span></span>
+<span style="background:#21262d;color:#85C1E9;padding:4px 12px;border-radius:12px;font-size:12px">独立流行 <span style="color:#8b949e">12</span></span>
+<span style="background:#21262d;color:#F8C471;padding:4px 12px;border-radius:12px;font-size:12px">爵士 <span style="color:#8b949e">12</span></span>
+<span style="background:#21262d;color:#82E0AA;padding:4px 12px;border-radius:12px;font-size:12px">经典 <span style="color:#8b949e">12</span></span>
+<span style="background:#21262d;color:#F1948A;padding:4px 12px;border-radius:12px;font-size:12px">氛围 <span style="color:#8b949e">12</span></span>
+<span style="background:#21262d;color:#85929E;padding:4px 12px;border-radius:12px;font-size:12px">Acoustic <span style="color:#8b949e">11</span></span>
+<span style="background:#21262d;color:#AED6F1;padding:4px 12px;border-radius:12px;font-size:12px">爵士说唱 <span style="color:#8b949e">11</span></span>
+<span style="background:#21262d;color:#FF6B6B;padding:4px 12px;border-radius:12px;font-size:12px">纯音乐 <span style="color:#8b949e">11</span></span>
+<span style="background:#21262d;color:#4ECDC4;padding:4px 12px;border-radius:12px;font-size:12px">Chillout <span style="color:#8b949e">10</span></span>
+<span style="background:#21262d;color:#45B7D1;padding:4px 12px;border-radius:12px;font-size:12px">Lounge <span style="color:#8b949e">10</span></span>
+<span style="background:#21262d;color:#96CEB4;padding:4px 12px;border-radius:12px;font-size:12px">Ethnic <span style="color:#8b949e">10</span></span>
+<span style="background:#21262d;color:#FFEAA7;padding:4px 12px;border-radius:12px;font-size:12px">Dream <span style="color:#8b949e">9</span></span>
+<span style="background:#21262d;color:#DDA0DD;padding:4px 12px;border-radius:12px;font-size:12px">翻唱 <span style="color:#8b949e">9</span></span>
+<span style="background:#21262d;color:#98D8C8;padding:4px 12px;border-radius:12px;font-size:12px">Boom <span style="color:#8b949e">9</span></span>
+<span style="background:#21262d;color:#F7DC6F;padding:4px 12px;border-radius:12px;font-size:12px">Bap <span style="color:#8b949e">9</span></span>
+<span style="background:#21262d;color:#BB8FCE;padding:4px 12px;border-radius:12px;font-size:12px">Post-Rock <span style="color:#8b949e">9</span></span>
+<span style="background:#21262d;color:#85C1E9;padding:4px 12px;border-radius:12px;font-size:12px">台湾经典 <span style="color:#8b949e">9</span></span>
+<span style="background:#21262d;color:#F8C471;padding:4px 12px;border-radius:12px;font-size:12px">摇滚 <span style="color:#8b949e">8</span></span>
+<span style="background:#21262d;color:#82E0AA;padding:4px 12px;border-radius:12px;font-size:12px">Soul <span style="color:#8b949e">8</span></span>
+<span style="background:#21262d;color:#F1948A;padding:4px 12px;border-radius:12px;font-size:12px">复古 <span style="color:#8b949e">8</span></span>
+<span style="background:#21262d;color:#85929E;padding:4px 12px;border-radius:12px;font-size:12px">另类摇滚 <span style="color:#8b949e">8</span></span>
+<span style="background:#21262d;color:#AED6F1;padding:4px 12px;border-radius:12px;font-size:12px">神秘 <span style="color:#8b949e">7</span></span>
+<span style="background:#21262d;color:#FF6B6B;padding:4px 12px;border-radius:12px;font-size:12px">慵懒 <span style="color:#8b949e">7</span></span>
+<span style="background:#21262d;color:#4ECDC4;padding:4px 12px;border-radius:12px;font-size:12px">独立民谣 <span style="color:#8b949e">7</span></span>
+<span style="background:#21262d;color:#45B7D1;padding:4px 12px;border-radius:12px;font-size:12px">甜蜜 <span style="color:#8b949e">7</span></span>
+<span style="background:#21262d;color:#96CEB4;padding:4px 12px;border-radius:12px;font-size:12px">遗憾 <span style="color:#8b949e">6</span></span>
+<span style="background:#21262d;color:#FFEAA7;padding:4px 12px;border-radius:12px;font-size:12px">另类 <span style="color:#8b949e">6</span></span>
+<span style="background:#21262d;color:#DDA0DD;padding:4px 12px;border-radius:12px;font-size:12px">自嘲 <span style="color:#8b949e">6</span></span>
+<span style="background:#21262d;color:#98D8C8;padding:4px 12px;border-radius:12px;font-size:12px">Neo-Classical <span style="color:#8b949e">6</span></span>
+<span style="background:#21262d;color:#F7DC6F;padding:4px 12px;border-radius:12px;font-size:12px">Soundscape <span style="color:#8b949e">6</span></span>
+<span style="background:#21262d;color:#BB8FCE;padding:4px 12px;border-radius:12px;font-size:12px">治愈 <span style="color:#8b949e">5</span></span>
+<span style="background:#21262d;color:#85C1E9;padding:4px 12px;border-radius:12px;font-size:12px">抒情 <span style="color:#8b949e">5</span></span>
+<span style="background:#21262d;color:#F8C471;padding:4px 12px;border-radius:12px;font-size:12px">温暖 <span style="color:#8b949e">5</span></span>
+<span style="background:#21262d;color:#82E0AA;padding:4px 12px;border-radius:12px;font-size:12px">自信 <span style="color:#8b949e">5</span></span>
+<span style="background:#21262d;color:#F1948A;padding:4px 12px;border-radius:12px;font-size:12px">力量 <span style="color:#8b949e">5</span></span>
+<span style="background:#21262d;color:#85929E;padding:4px 12px;border-radius:12px;font-size:12px">宁静 <span style="color:#8b949e">5</span></span>
+<span style="background:#21262d;color:#AED6F1;padding:4px 12px;border-radius:12px;font-size:12px">华语说唱 <span style="color:#8b949e">5</span></span>
+<span style="background:#21262d;color:#FF6B6B;padding:4px 12px;border-radius:12px;font-size:12px">Soulful <span style="color:#8b949e">5</span></span>
+<span style="background:#21262d;color:#4ECDC4;padding:4px 12px;border-radius:12px;font-size:12px">台湾后摇 <span style="color:#8b949e">5</span></span>
+<span style="background:#21262d;color:#45B7D1;padding:4px 12px;border-radius:12px;font-size:12px">Electronic <span style="color:#8b949e">5</span></span>
+<span style="background:#21262d;color:#96CEB4;padding:4px 12px;border-radius:12px;font-size:12px">Experimental <span style="color:#8b949e">5</span></span>
+<span style="background:#21262d;color:#FFEAA7;padding:4px 12px;border-radius:12px;font-size:12px">Psychedelic <span style="color:#8b949e">4</span></span>
+<span style="background:#21262d;color:#DDA0DD;padding:4px 12px;border-radius:12px;font-size:12px">迷幻 <span style="color:#8b949e">4</span></span>
+<span style="background:#21262d;color:#98D8C8;padding:4px 12px;border-radius:12px;font-size:12px">Dark <span style="color:#8b949e">4</span></span>
+<span style="background:#21262d;color:#F7DC6F;padding:4px 12px;border-radius:12px;font-size:12px">民族 <span style="color:#8b949e">4</span></span>
+<span style="background:#21262d;color:#BB8FCE;padding:4px 12px;border-radius:12px;font-size:12px">Funk <span style="color:#8b949e">4</span></span>
+<span style="background:#21262d;color:#85C1E9;padding:4px 12px;border-radius:12px;font-size:12px">孤独 <span style="color:#8b949e">4</span></span>
+<span style="background:#21262d;color:#F8C471;padding:4px 12px;border-radius:12px;font-size:12px">实验 <span style="color:#8b949e">4</span></span>
+<span style="background:#21262d;color:#82E0AA;padding:4px 12px;border-radius:12px;font-size:12px">搞怪 <span style="color:#8b949e">4</span></span>
+<span style="background:#21262d;color:#F1948A;padding:4px 12px;border-radius:12px;font-size:12px">怀旧 <span style="color:#8b949e">4</span></span>
+<span style="background:#21262d;color:#85929E;padding:4px 12px;border-radius:12px;font-size:12px">轻松 <span style="color:#8b949e">4</span></span>
+<span style="background:#21262d;color:#AED6F1;padding:4px 12px;border-radius:12px;font-size:12px">爆发 <span style="color:#8b949e">4</span></span>
+<span style="background:#21262d;color:#FF6B6B;padding:4px 12px;border-radius:12px;font-size:12px">成长 <span style="color:#8b949e">4</span></span>
+<span style="background:#21262d;color:#4ECDC4;padding:4px 12px;border-radius:12px;font-size:12px">灵魂乐 <span style="color:#8b949e">4</span></span>
+<span style="background:#21262d;color:#45B7D1;padding:4px 12px;border-radius:12px;font-size:12px">夏日 <span style="color:#8b949e">4</span></span>
+<span style="background:#21262d;color:#96CEB4;padding:4px 12px;border-radius:12px;font-size:12px">梦幻 <span style="color:#8b949e">4</span></span>
+<span style="background:#21262d;color:#FFEAA7;padding:4px 12px;border-radius:12px;font-size:12px">放克 <span style="color:#8b949e">4</span></span>
+<span style="background:#21262d;color:#DDA0DD;padding:4px 12px;border-radius:12px;font-size:12px">生活 <span style="color:#8b949e">4</span></span>
+<span style="background:#21262d;color:#98D8C8;padding:4px 12px;border-radius:12px;font-size:12px">态度 <span style="color:#8b949e">4</span></span>
+<span style="background:#21262d;color:#F7DC6F;padding:4px 12px;border-radius:12px;font-size:12px">现实 <span style="color:#8b949e">4</span></span>
+<span style="background:#21262d;color:#BB8FCE;padding:4px 12px;border-radius:12px;font-size:12px">宏大 <span style="color:#8b949e">4</span></span>
+<span style="background:#21262d;color:#85C1E9;padding:4px 12px;border-radius:12px;font-size:12px">空灵 <span style="color:#8b949e">4</span></span>
+<span style="background:#21262d;color:#F8C471;padding:4px 12px;border-radius:12px;font-size:12px">致敬 <span style="color:#8b949e">4</span></span>
+<span style="background:#21262d;color:#82E0AA;padding:4px 12px;border-radius:12px;font-size:12px">自由 <span style="color:#8b949e">4</span></span>
+<span style="background:#21262d;color:#F1948A;padding:4px 12px;border-radius:12px;font-size:12px">告别 <span style="color:#8b949e">4</span></span>
+<span style="background:#21262d;color:#85929E;padding:4px 12px;border-radius:12px;font-size:12px">梦想 <span style="color:#8b949e">4</span></span>
+<span style="background:#21262d;color:#AED6F1;padding:4px 12px;border-radius:12px;font-size:12px">希望 <span style="color:#8b949e">4</span></span>
+<span style="background:#21262d;color:#FF6B6B;padding:4px 12px;border-radius:12px;font-size:12px">乐观 <span style="color:#8b949e">4</span></span>
+<span style="background:#21262d;color:#4ECDC4;padding:4px 12px;border-radius:12px;font-size:12px">Chill <span style="color:#8b949e">4</span></span>
+<span style="background:#21262d;color:#45B7D1;padding:4px 12px;border-radius:12px;font-size:12px">台湾说唱 <span style="color:#8b949e">4</span></span>
+<span style="background:#21262d;color:#96CEB4;padding:4px 12px;border-radius:12px;font-size:12px">Drone <span style="color:#8b949e">4</span></span>
+<span style="background:#21262d;color:#FFEAA7;padding:4px 12px;border-radius:12px;font-size:12px">Art <span style="color:#8b949e">4</span></span>
+<span style="background:#21262d;color:#DDA0DD;padding:4px 12px;border-radius:12px;font-size:12px">British <span style="color:#8b949e">4</span></span>
+<span style="background:#21262d;color:#98D8C8;padding:4px 12px;border-radius:12px;font-size:12px">French <span style="color:#8b949e">3</span></span>
+<span style="background:#21262d;color:#F7DC6F;padding:4px 12px;border-radius:12px;font-size:12px">欢快 <span style="color:#8b949e">3</span></span>
+<span style="background:#21262d;color:#BB8FCE;padding:4px 12px;border-radius:12px;font-size:12px">悲伤 <span style="color:#8b949e">3</span></span>
+<span style="background:#21262d;color:#85C1E9;padding:4px 12px;border-radius:12px;font-size:12px">Trap <span style="color:#8b949e">3</span></span>
+<span style="background:#21262d;color:#F8C471;padding:4px 12px;border-radius:12px;font-size:12px">永恒 <span style="color:#8b949e">3</span></span>
+<span style="background:#21262d;color:#82E0AA;padding:4px 12px;border-radius:12px;font-size:12px">律动 <span style="color:#8b949e">3</span></span>
+<span style="background:#21262d;color:#F1948A;padding:4px 12px;border-radius:12px;font-size:12px">深沉 <span style="color:#8b949e">3</span></span>
+<span style="background:#21262d;color:#85929E;padding:4px 12px;border-radius:12px;font-size:12px">幽默 <span style="color:#8b949e">3</span></span>
+<span style="background:#21262d;color:#AED6F1;padding:4px 12px;border-radius:12px;font-size:12px">另类流行 <span style="color:#8b949e">3</span></span>
+<span style="background:#21262d;color:#FF6B6B;padding:4px 12px;border-radius:12px;font-size:12px">真实 <span style="color:#8b949e">3</span></span>
+<span style="background:#21262d;color:#4ECDC4;padding:4px 12px;border-radius:12px;font-size:12px">洗脑 <span style="color:#8b949e">3</span></span>
+<span style="background:#21262d;color:#45B7D1;padding:4px 12px;border-radius:12px;font-size:12px">古典 <span style="color:#8b949e">3</span></span>
+<span style="background:#21262d;color:#96CEB4;padding:4px 12px;border-radius:12px;font-size:12px">独立摇滚 <span style="color:#8b949e">3</span></span>
+<span style="background:#21262d;color:#FFEAA7;padding:4px 12px;border-radius:12px;font-size:12px">Minimalist <span style="color:#8b949e">3</span></span>
+<span style="background:#21262d;color:#DDA0DD;padding:4px 12px;border-radius:12px;font-size:12px">Vocal <span style="color:#8b949e">3</span></span>
+<span style="background:#21262d;color:#98D8C8;padding:4px 12px;border-radius:12px;font-size:12px">Groove <span style="color:#8b949e">3</span></span>
+<span style="background:#21262d;color:#F7DC6F;padding:4px 12px;border-radius:12px;font-size:12px">台湾民谣 <span style="color:#8b949e">3</span></span>
+<span style="background:#21262d;color:#BB8FCE;padding:4px 12px;border-radius:12px;font-size:12px">Synth <span style="color:#8b949e">3</span></span>
+<span style="background:#21262d;color:#85C1E9;padding:4px 12px;border-radius:12px;font-size:12px">Piano <span style="color:#8b949e">3</span></span>
+<span style="background:#21262d;color:#F8C471;padding:4px 12px;border-radius:12px;font-size:12px">Downtempo <span style="color:#8b949e">3</span></span>
+<span style="background:#21262d;color:#82E0AA;padding:4px 12px;border-radius:12px;font-size:12px">Brazilian <span style="color:#8b949e">3</span></span>
+<span style="background:#21262d;color:#F1948A;padding:4px 12px;border-radius:12px;font-size:12px">Documentary <span style="color:#8b949e">3</span></span>
+<span style="background:#21262d;color:#85929E;padding:4px 12px;border-radius:12px;font-size:12px">Contemporary <span style="color:#8b949e">3</span></span>
+<span style="background:#21262d;color:#AED6F1;padding:4px 12px;border-radius:12px;font-size:12px">Post-Punk <span style="color:#8b949e">3</span></span>
+<span style="background:#21262d;color:#FF6B6B;padding:4px 12px;border-radius:12px;font-size:12px">Lo-fi <span style="color:#8b949e">2</span></span>
+<span style="background:#21262d;color:#4ECDC4;padding:4px 12px;border-radius:12px;font-size:12px">轻快 <span style="color:#8b949e">2</span></span>
+<span style="background:#21262d;color:#45B7D1;padding:4px 12px;border-radius:12px;font-size:12px">Reggae <span style="color:#8b949e">2</span></span>
+<span style="background:#21262d;color:#96CEB4;padding:4px 12px;border-radius:12px;font-size:12px">Electro <span style="color:#8b949e">2</span></span>
+<span style="background:#21262d;color:#FFEAA7;padding:4px 12px;border-radius:12px;font-size:12px">坚定 <span style="color:#8b949e">2</span></span>
+<span style="background:#21262d;color:#DDA0DD;padding:4px 12px;border-radius:12px;font-size:12px">依赖 <span style="color:#8b949e">2</span></span>
+<span style="background:#21262d;color:#98D8C8;padding:4px 12px;border-radius:12px;font-size:12px">脆弱 <span style="color:#8b949e">2</span></span>
+<span style="background:#21262d;color:#F7DC6F;padding:4px 12px;border-radius:12px;font-size:12px">暧昧 <span style="color:#8b949e">2</span></span>
+<span style="background:#21262d;color:#BB8FCE;padding:4px 12px;border-radius:12px;font-size:12px">迷失 <span style="color:#8b949e">2</span></span>
+<span style="background:#21262d;color:#85C1E9;padding:4px 12px;border-radius:12px;font-size:12px">City <span style="color:#8b949e">2</span></span>
+<span style="background:#21262d;color:#F8C471;padding:4px 12px;border-radius:12px;font-size:12px">童年 <span style="color:#8b949e">2</span></span>
+<span style="background:#21262d;color:#82E0AA;padding:4px 12px;border-radius:12px;font-size:12px">释怀 <span style="color:#8b949e">2</span></span>
+<span style="background:#21262d;color:#F1948A;padding:4px 12px;border-radius:12px;font-size:12px">神圣 <span style="color:#8b949e">2</span></span>
+<span style="background:#21262d;color:#85929E;padding:4px 12px;border-radius:12px;font-size:12px">反叛 <span style="color:#8b949e">2</span></span>
+<span style="background:#21262d;color:#AED6F1;padding:4px 12px;border-radius:12px;font-size:12px">内省 <span style="color:#8b949e">2</span></span>
+<span style="background:#21262d;color:#FF6B6B;padding:4px 12px;border-radius:12px;font-size:12px">救赎 <span style="color:#8b949e">2</span></span>
+<span style="background:#21262d;color:#4ECDC4;padding:4px 12px;border-radius:12px;font-size:12px">暗黑 <span style="color:#8b949e">2</span></span>
+<span style="background:#21262d;color:#45B7D1;padding:4px 12px;border-radius:12px;font-size:12px">怀念 <span style="color:#8b949e">2</span></span>
+<span style="background:#21262d;color:#96CEB4;padding:4px 12px;border-radius:12px;font-size:12px">灵性 <span style="color:#8b949e">2</span></span>
+<span style="background:#21262d;color:#FFEAA7;padding:4px 12px;border-radius:12px;font-size:12px">哲思 <span style="color:#8b949e">2</span></span>
+<span style="background:#21262d;color:#DDA0DD;padding:4px 12px;border-radius:12px;font-size:12px">重生 <span style="color:#8b949e">2</span></span>
+<span style="background:#21262d;color:#98D8C8;padding:4px 12px;border-radius:12px;font-size:12px">讽刺 <span style="color:#8b949e">2</span></span>
+<span style="background:#21262d;color:#F7DC6F;padding:4px 12px;border-radius:12px;font-size:12px">抽象 <span style="color:#8b949e">2</span></span>
+<span style="background:#21262d;color:#BB8FCE;padding:4px 12px;border-radius:12px;font-size:12px">诱惑 <span style="color:#8b949e">2</span></span>
+<span style="background:#21262d;color:#85C1E9;padding:4px 12px;border-radius:12px;font-size:12px">渴望 <span style="color:#8b949e">2</span></span>
+<span style="background:#21262d;color:#F8C471;padding:4px 12px;border-radius:12px;font-size:12px">循环 <span style="color:#8b949e">2</span></span>
+<span style="background:#21262d;color:#82E0AA;padding:4px 12px;border-radius:12px;font-size:12px">街头 <span style="color:#8b949e">2</span></span>
+<span style="background:#21262d;color:#F1948A;padding:4px 12px;border-radius:12px;font-size:12px">感恩 <span style="color:#8b949e">2</span></span>
+<span style="background:#21262d;color:#85929E;padding:4px 12px;border-radius:12px;font-size:12px">深邃 <span style="color:#8b949e">2</span></span>
+<span style="background:#21262d;color:#AED6F1;padding:4px 12px;border-radius:12px;font-size:12px">挣扎 <span style="color:#8b949e">2</span></span>
+<span style="background:#21262d;color:#FF6B6B;padding:4px 12px;border-radius:12px;font-size:12px">温柔 <span style="color:#8b949e">2</span></span>
+<span style="background:#21262d;color:#4ECDC4;padding:4px 12px;border-radius:12px;font-size:12px">社会 <span style="color:#8b949e">2</span></span>
+<span style="background:#21262d;color:#45B7D1;padding:4px 12px;border-radius:12px;font-size:12px">后摇 <span style="color:#8b949e">2</span></span>
+<span style="background:#21262d;color:#96CEB4;padding:4px 12px;border-radius:12px;font-size:12px">可爱 <span style="color:#8b949e">2</span></span>
+<span style="background:#21262d;color:#FFEAA7;padding:4px 12px;border-radius:12px;font-size:12px">传奇 <span style="color:#8b949e">2</span></span>
+<span style="background:#21262d;color:#DDA0DD;padding:4px 12px;border-radius:12px;font-size:12px">Lyrical <span style="color:#8b949e">2</span></span>
+<span style="background:#21262d;color:#98D8C8;padding:4px 12px;border-radius:12px;font-size:12px">Conscious <span style="color:#8b949e">2</span></span>
+<span style="background:#21262d;color:#F7DC6F;padding:4px 12px;border-radius:12px;font-size:12px">Classic <span style="color:#8b949e">2</span></span>
+<span style="background:#21262d;color:#BB8FCE;padding:4px 12px;border-radius:12px;font-size:12px">Sample <span style="color:#8b949e">2</span></span>
+<span style="background:#21262d;color:#85C1E9;padding:4px 12px;border-radius:12px;font-size:12px">Hard <span style="color:#8b949e">2</span></span>
+<span style="background:#21262d;color:#F8C471;padding:4px 12px;border-radius:12px;font-size:12px">Nature <span style="color:#8b949e">2</span></span>
+<span style="background:#21262d;color:#82E0AA;padding:4px 12px;border-radius:12px;font-size:12px">Spiritual <span style="color:#8b949e">2</span></span>
+<span style="background:#21262d;color:#F1948A;padding:4px 12px;border-radius:12px;font-size:12px">Classical <span style="color:#8b949e">2</span></span>
+<span style="background:#21262d;color:#85929E;padding:4px 12px;border-radius:12px;font-size:12px">Soundtrack <span style="color:#8b949e">2</span></span>
+<span style="background:#21262d;color:#AED6F1;padding:4px 12px;border-radius:12px;font-size:12px">Spoken <span style="color:#8b949e">2</span></span>
+<span style="background:#21262d;color:#FF6B6B;padding:4px 12px;border-radius:12px;font-size:12px">Word <span style="color:#8b949e">2</span></span>
+<span style="background:#21262d;color:#4ECDC4;padding:4px 12px;border-radius:12px;font-size:12px">Traditional <span style="color:#8b949e">2</span></span>
+<span style="background:#21262d;color:#45B7D1;padding:4px 12px;border-radius:12px;font-size:12px">UK <span style="color:#8b949e">2</span></span>
+<span style="background:#21262d;color:#96CEB4;padding:4px 12px;border-radius:12px;font-size:12px">Neo-Soul <span style="color:#8b949e">2</span></span>
+<span style="background:#21262d;color:#FFEAA7;padding:4px 12px;border-radius:12px;font-size:12px">Ethereal <span style="color:#8b949e">2</span></span>
+<span style="background:#21262d;color:#DDA0DD;padding:4px 12px;border-radius:12px;font-size:12px">Bollywood <span style="color:#8b949e">2</span></span>
+<span style="background:#21262d;color:#98D8C8;padding:4px 12px;border-radius:12px;font-size:12px">50 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#F7DC6F;padding:4px 12px;border-radius:12px;font-size:12px">Touch <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#BB8FCE;padding:4px 12px;border-radius:12px;font-size:12px">Lofi <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#85C1E9;padding:4px 12px;border-radius:12px;font-size:12px">生活感 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#F8C471;padding:4px 12px;border-radius:12px;font-size:12px">Cabaret <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#82E0AA;padding:4px 12px;border-radius:12px;font-size:12px">Trip-hop <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#F1948A;padding:4px 12px;border-radius:12px;font-size:12px">颓废 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#85929E;padding:4px 12px;border-radius:12px;font-size:12px">励志 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#AED6F1;padding:4px 12px;border-radius:12px;font-size:12px">Italian <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#FF6B6B;padding:4px 12px;border-radius:12px;font-size:12px">破碎感 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#4ECDC4;padding:4px 12px;border-radius:12px;font-size:12px">Thai <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#45B7D1;padding:4px 12px;border-radius:12px;font-size:12px">文艺 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#96CEB4;padding:4px 12px;border-radius:12px;font-size:12px">科幻 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#FFEAA7;padding:4px 12px;border-radius:12px;font-size:12px">霸气 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#DDA0DD;padding:4px 12px;border-radius:12px;font-size:12px">俄国民谣 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#98D8C8;padding:4px 12px;border-radius:12px;font-size:12px">奇幻 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#F7DC6F;padding:4px 12px;border-radius:12px;font-size:12px">采样 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#BB8FCE;padding:4px 12px;border-radius:12px;font-size:12px">雷鬼 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#85C1E9;padding:4px 12px;border-radius:12px;font-size:12px">新西兰民谣 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#F8C471;padding:4px 12px;border-radius:12px;font-size:12px">期待 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#82E0AA;padding:4px 12px;border-radius:12px;font-size:12px">焦虑 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#F1948A;padding:4px 12px;border-radius:12px;font-size:12px">复古流行 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#85929E;padding:4px 12px;border-radius:12px;font-size:12px">年代 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#AED6F1;padding:4px 12px;border-radius:12px;font-size:12px">关怀 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#FF6B6B;padding:4px 12px;border-radius:12px;font-size:12px">梦幻流行 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#4ECDC4;padding:4px 12px;border-radius:12px;font-size:12px">奢靡 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#45B7D1;padding:4px 12px;border-radius:12px;font-size:12px">诡异 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#96CEB4;padding:4px 12px;border-radius:12px;font-size:12px">摇篮曲 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#FFEAA7;padding:4px 12px;border-radius:12px;font-size:12px">怪诞 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#DDA0DD;padding:4px 12px;border-radius:12px;font-size:12px">迷惘 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#98D8C8;padding:4px 12px;border-radius:12px;font-size:12px">宠溺 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#F7DC6F;padding:4px 12px;border-radius:12px;font-size:12px">城市流行 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#BB8FCE;padding:4px 12px;border-radius:12px;font-size:12px">都市 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#85C1E9;padding:4px 12px;border-radius:12px;font-size:12px">觉醒 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#F8C471;padding:4px 12px;border-radius:12px;font-size:12px">豁达 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#82E0AA;padding:4px 12px;border-radius:12px;font-size:12px">泰国流行 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#F1948A;padding:4px 12px;border-radius:12px;font-size:12px">混乱 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#85929E;padding:4px 12px;border-radius:12px;font-size:12px">呼唤 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#AED6F1;padding:4px 12px;border-radius:12px;font-size:12px">探索 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#FF6B6B;padding:4px 12px;border-radius:12px;font-size:12px">叙事 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#4ECDC4;padding:4px 12px;border-radius:12px;font-size:12px">多元 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#45B7D1;padding:4px 12px;border-radius:12px;font-size:12px">阳光 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#96CEB4;padding:4px 12px;border-radius:12px;font-size:12px">积极 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#FFEAA7;padding:4px 12px;border-radius:12px;font-size:12px">日语 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#DDA0DD;padding:4px 12px;border-radius:12px;font-size:12px">融合 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#98D8C8;padding:4px 12px;border-radius:12px;font-size:12px">末日 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#F7DC6F;padding:4px 12px;border-radius:12px;font-size:12px">甜酷 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#BB8FCE;padding:4px 12px;border-radius:12px;font-size:12px">搞笑说唱 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#85C1E9;padding:4px 12px;border-radius:12px;font-size:12px">恶搞 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#F8C471;padding:4px 12px;border-radius:12px;font-size:12px">热带 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#82E0AA;padding:4px 12px;border-radius:12px;font-size:12px">随性 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#F1948A;padding:4px 12px;border-radius:12px;font-size:12px">青春 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#85929E;padding:4px 12px;border-radius:12px;font-size:12px">秋日 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#AED6F1;padding:4px 12px;border-radius:12px;font-size:12px">迷离 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#FF6B6B;padding:4px 12px;border-radius:12px;font-size:12px">清新 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#4ECDC4;padding:4px 12px;border-radius:12px;font-size:12px">搞笑 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#45B7D1;padding:4px 12px;border-radius:12px;font-size:12px">福音 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#96CEB4;padding:4px 12px;border-radius:12px;font-size:12px">Blues <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#FFEAA7;padding:4px 12px;border-radius:12px;font-size:12px">微醺 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#DDA0DD;padding:4px 12px;border-radius:12px;font-size:12px">绚烂 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#98D8C8;padding:4px 12px;border-radius:12px;font-size:12px">守候 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#F7DC6F;padding:4px 12px;border-radius:12px;font-size:12px">迪斯科 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#BB8FCE;padding:4px 12px;border-radius:12px;font-size:12px">狂欢 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#85C1E9;padding:4px 12px;border-radius:12px;font-size:12px">思念 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#F8C471;padding:4px 12px;border-radius:12px;font-size:12px">独立 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#82E0AA;padding:4px 12px;border-radius:12px;font-size:12px">大气 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#F1948A;padding:4px 12px;border-radius:12px;font-size:12px">迷幻摇滚 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#85929E;padding:4px 12px;border-radius:12px;font-size:12px">纯真 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#AED6F1;padding:4px 12px;border-radius:12px;font-size:12px">私密 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#FF6B6B;padding:4px 12px;border-radius:12px;font-size:12px">禅意 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#4ECDC4;padding:4px 12px;border-radius:12px;font-size:12px">忧伤 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#45B7D1;padding:4px 12px;border-radius:12px;font-size:12px">虔诚 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#96CEB4;padding:4px 12px;border-radius:12px;font-size:12px">传递 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#FFEAA7;padding:4px 12px;border-radius:12px;font-size:12px">拉丁 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#DDA0DD;padding:4px 12px;border-radius:12px;font-size:12px">晚安 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#98D8C8;padding:4px 12px;border-radius:12px;font-size:12px">宣泄 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#F7DC6F;padding:4px 12px;border-radius:12px;font-size:12px">压抑 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#BB8FCE;padding:4px 12px;border-radius:12px;font-size:12px">神经质 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#85C1E9;padding:4px 12px;border-radius:12px;font-size:12px">远方 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#F8C471;padding:4px 12px;border-radius:12px;font-size:12px">诗意 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#82E0AA;padding:4px 12px;border-radius:12px;font-size:12px">欢乐 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#F1948A;padding:4px 12px;border-radius:12px;font-size:12px">宇宙 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#85929E;padding:4px 12px;border-radius:12px;font-size:12px">日常 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#AED6F1;padding:4px 12px;border-radius:12px;font-size:12px">黑暗 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#FF6B6B;padding:4px 12px;border-radius:12px;font-size:12px">德语 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#4ECDC4;padding:4px 12px;border-radius:12px;font-size:12px">坠落 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#45B7D1;padding:4px 12px;border-radius:12px;font-size:12px">崇拜 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#96CEB4;padding:4px 12px;border-radius:12px;font-size:12px">模糊 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#FFEAA7;padding:4px 12px;border-radius:12px;font-size:12px">逃避 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#DDA0DD;padding:4px 12px;border-radius:12px;font-size:12px">紧张 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#98D8C8;padding:4px 12px;border-radius:12px;font-size:12px">自然 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#F7DC6F;padding:4px 12px;border-radius:12px;font-size:12px">忧郁 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#BB8FCE;padding:4px 12px;border-radius:12px;font-size:12px">共鸣 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#85C1E9;padding:4px 12px;border-radius:12px;font-size:12px">风暴 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#F8C471;padding:4px 12px;border-radius:12px;font-size:12px">分享 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#82E0AA;padding:4px 12px;border-radius:12px;font-size:12px">细腻 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#F1948A;padding:4px 12px;border-radius:12px;font-size:12px">时光 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#85929E;padding:4px 12px;border-radius:12px;font-size:12px">宗教 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#AED6F1;padding:4px 12px;border-radius:12px;font-size:12px">Techno <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#FF6B6B;padding:4px 12px;border-radius:12px;font-size:12px">辉煌 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#4ECDC4;padding:4px 12px;border-radius:12px;font-size:12px">阴暗 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#45B7D1;padding:4px 12px;border-radius:12px;font-size:12px">流逝 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#96CEB4;padding:4px 12px;border-radius:12px;font-size:12px">呐喊 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#FFEAA7;padding:4px 12px;border-radius:12px;font-size:12px">死亡 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#DDA0DD;padding:4px 12px;border-radius:12px;font-size:12px">旅行 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#98D8C8;padding:4px 12px;border-radius:12px;font-size:12px">独特 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#F7DC6F;padding:4px 12px;border-radius:12px;font-size:12px">病毒 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#BB8FCE;padding:4px 12px;border-radius:12px;font-size:12px">回归 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#85C1E9;padding:4px 12px;border-radius:12px;font-size:12px">技术 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#F8C471;padding:4px 12px;border-radius:12px;font-size:12px">炸场 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#82E0AA;padding:4px 12px;border-radius:12px;font-size:12px">全明星 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#F1948A;padding:4px 12px;border-radius:12px;font-size:12px">炫技 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#85929E;padding:4px 12px;border-radius:12px;font-size:12px">陪伴 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#AED6F1;padding:4px 12px;border-radius:12px;font-size:12px">梦境 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#FF6B6B;padding:4px 12px;border-radius:12px;font-size:12px">询问 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#4ECDC4;padding:4px 12px;border-radius:12px;font-size:12px">地下 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#45B7D1;padding:4px 12px;border-radius:12px;font-size:12px">深刻 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#96CEB4;padding:4px 12px;border-radius:12px;font-size:12px">舞蹈 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#FFEAA7;padding:4px 12px;border-radius:12px;font-size:12px">起源 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#DDA0DD;padding:4px 12px;border-radius:12px;font-size:12px">焦点 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#98D8C8;padding:4px 12px;border-radius:12px;font-size:12px">钢琴 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#F7DC6F;padding:4px 12px;border-radius:12px;font-size:12px">感悟 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#BB8FCE;padding:4px 12px;border-radius:12px;font-size:12px">卖萌 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#85C1E9;padding:4px 12px;border-radius:12px;font-size:12px">当下 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#F8C471;padding:4px 12px;border-radius:12px;font-size:12px">珍惜 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#82E0AA;padding:4px 12px;border-radius:12px;font-size:12px">延续 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#F1948A;padding:4px 12px;border-radius:12px;font-size:12px">责怪 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#85929E;padding:4px 12px;border-radius:12px;font-size:12px">摇摆 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#AED6F1;padding:4px 12px;border-radius:12px;font-size:12px">父爱 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#FF6B6B;padding:4px 12px;border-radius:12px;font-size:12px">硬核 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#4ECDC4;padding:4px 12px;border-radius:12px;font-size:12px">绝望 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#45B7D1;padding:4px 12px;border-radius:12px;font-size:12px">意大利 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#96CEB4;padding:4px 12px;border-radius:12px;font-size:12px">道歉 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#FFEAA7;padding:4px 12px;border-radius:12px;font-size:12px">真诚 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#DDA0DD;padding:4px 12px;border-radius:12px;font-size:12px">故事 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#98D8C8;padding:4px 12px;border-radius:12px;font-size:12px">拒绝 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#F7DC6F;padding:4px 12px;border-radius:12px;font-size:12px">即兴 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#BB8FCE;padding:4px 12px;border-radius:12px;font-size:12px">前世 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#85C1E9;padding:4px 12px;border-radius:12px;font-size:12px">承诺 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#F8C471;padding:4px 12px;border-radius:12px;font-size:12px">复仇 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#82E0AA;padding:4px 12px;border-radius:12px;font-size:12px">战斗 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#F1948A;padding:4px 12px;border-radius:12px;font-size:12px">激励 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#85929E;padding:4px 12px;border-radius:12px;font-size:12px">野心 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#AED6F1;padding:4px 12px;border-radius:12px;font-size:12px">征服 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#FF6B6B;padding:4px 12px;border-radius:12px;font-size:12px">守护 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#4ECDC4;padding:4px 12px;border-radius:12px;font-size:12px">红酒 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#45B7D1;padding:4px 12px;border-radius:12px;font-size:12px">重逢 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#96CEB4;padding:4px 12px;border-radius:12px;font-size:12px">障碍 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#FFEAA7;padding:4px 12px;border-radius:12px;font-size:12px">突破 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#DDA0DD;padding:4px 12px;border-radius:12px;font-size:12px">深夜 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#98D8C8;padding:4px 12px;border-radius:12px;font-size:12px">大麻 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#F7DC6F;padding:4px 12px;border-radius:12px;font-size:12px">触感 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#BB8FCE;padding:4px 12px;border-radius:12px;font-size:12px">无理由 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#85C1E9;padding:4px 12px;border-radius:12px;font-size:12px">冲动 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#F8C471;padding:4px 12px;border-radius:12px;font-size:12px">Latin <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#82E0AA;padding:4px 12px;border-radius:12px;font-size:12px">Underground <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#F1948A;padding:4px 12px;border-radius:12px;font-size:12px">Tribute <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#85929E;padding:4px 12px;border-radius:12px;font-size:12px">日系 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#AED6F1;padding:4px 12px;border-radius:12px;font-size:12px">Bop <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#FF6B6B;padding:4px 12px;border-radius:12px;font-size:12px">传统 <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#4ECDC4;padding:4px 12px;border-radius:12px;font-size:12px">Emotional <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#45B7D1;padding:4px 12px;border-radius:12px;font-size:12px">Atmospheric <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#96CEB4;padding:4px 12px;border-radius:12px;font-size:12px">Strings <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#FFEAA7;padding:4px 12px;border-radius:12px;font-size:12px">Minimal <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#DDA0DD;padding:4px 12px;border-radius:12px;font-size:12px">Sleep <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#98D8C8;padding:4px 12px;border-radius:12px;font-size:12px">Meditation <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#F7DC6F;padding:4px 12px;border-radius:12px;font-size:12px">Noise <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#BB8FCE;padding:4px 12px;border-radius:12px;font-size:12px">Jangle <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#85C1E9;padding:4px 12px;border-radius:12px;font-size:12px">New <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#F8C471;padding:4px 12px;border-radius:12px;font-size:12px">Wave <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#82E0AA;padding:4px 12px;border-radius:12px;font-size:12px">Trip-Hop <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#F1948A;padding:4px 12px;border-radius:12px;font-size:12px">Arena <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#85929E;padding:4px 12px;border-radius:12px;font-size:12px">Bossa <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#AED6F1;padding:4px 12px;border-radius:12px;font-size:12px">Nova <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#FF6B6B;padding:4px 12px;border-radius:12px;font-size:12px">Guitar <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#4ECDC4;padding:4px 12px;border-radius:12px;font-size:12px">Country <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#45B7D1;padding:4px 12px;border-radius:12px;font-size:12px">Singer-Songwriter <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#96CEB4;padding:4px 12px;border-radius:12px;font-size:12px">Crossover <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#FFEAA7;padding:4px 12px;border-radius:12px;font-size:12px">Orchestral <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#DDA0DD;padding:4px 12px;border-radius:12px;font-size:12px">Drama <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#98D8C8;padding:4px 12px;border-radius:12px;font-size:12px">Afro-Jazz <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#F7DC6F;padding:4px 12px;border-radius:12px;font-size:12px">Synthwave <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#BB8FCE;padding:4px 12px;border-radius:12px;font-size:12px">Italo <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#85C1E9;padding:4px 12px;border-radius:12px;font-size:12px">Disco <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#F8C471;padding:4px 12px;border-radius:12px;font-size:12px">Fusion <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#82E0AA;padding:4px 12px;border-radius:12px;font-size:12px">African <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#F1948A;padding:4px 12px;border-radius:12px;font-size:12px">Portuguese <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#85929E;padding:4px 12px;border-radius:12px;font-size:12px">Musique <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#AED6F1;padding:4px 12px;border-radius:12px;font-size:12px">Concrète <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#FF6B6B;padding:4px 12px;border-radius:12px;font-size:12px">Sound <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#4ECDC4;padding:4px 12px;border-radius:12px;font-size:12px">Choral <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#45B7D1;padding:4px 12px;border-radius:12px;font-size:12px">Whistle <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#96CEB4;padding:4px 12px;border-radius:12px;font-size:12px">Swedish <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#FFEAA7;padding:4px 12px;border-radius:12px;font-size:12px">Chamber <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#DDA0DD;padding:4px 12px;border-radius:12px;font-size:12px">Beat <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#98D8C8;padding:4px 12px;border-radius:12px;font-size:12px">Cover <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#F7DC6F;padding:4px 12px;border-radius:12px;font-size:12px">Japanese <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#BB8FCE;padding:4px 12px;border-radius:12px;font-size:12px">Persian <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#85C1E9;padding:4px 12px;border-radius:12px;font-size:12px">Indian <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#F8C471;padding:4px 12px;border-radius:12px;font-size:12px">Film <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#82E0AA;padding:4px 12px;border-radius:12px;font-size:12px">Dance <span style="color:#8b949e">1</span></span>
+<span style="background:#21262d;color:#F1948A;padding:4px 12px;border-radius:12px;font-size:12px">Dancehall <span style="color:#8b949e">1</span></span>
+  </div>
+</div>
+
+</body>
+</html>

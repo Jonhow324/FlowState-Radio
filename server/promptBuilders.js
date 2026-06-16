@@ -176,9 +176,55 @@ function buildColdOpenPrompt(firstSong, bridgeContext) {
   return { systemPrompt, userPrompt };
 }
 
+/**
+ * Build prompts for back announce generation (brief comment after a song ends).
+ * Lean context — persona, time, recent plays, and the song that just finished.
+ *
+ * Layers: persona + time + recentPlays + finishedSong
+ *
+ * @param {object} song - The song that just ended { name, artist, tags? }
+ * @param {object} [bridgeContext] - Pre-built context from personaLoader.buildBridgeContext()
+ * @returns {{ systemPrompt: string, userPrompt: string }}
+ */
+function buildBackAnnouncePrompt(song, bridgeContext) {
+  const bc = bridgeContext || personaLoader.buildBridgeContext();
+  const persona = bc.persona || personaLoader.getBridgePersona();
+  const timeContext = bc.timeContext || personaLoader.getTimeContext();
+  const recentPlays = bc.recentPlays || '';
+
+  const systemPrompt = [
+    persona,
+    '',
+    '一首歌刚播完，用一两句话做个简短的回味或感想。',
+    '',
+    '要求：',
+    '- 1-2句话，不要长',
+    '- 可以提歌名、歌手、某个触动你的细节，也可以只是感受',
+    '- 语气自然随意，像自言自语，不要播音腔',
+    '- 不要引号、不要前缀、不要列点',
+    '- 不要用"刚才那首"、"让我们"这类套话开头',
+    '',
+    timeContext,
+  ].join('\n');
+
+  const songName = song.name || song.trackName || '未知';
+  const songArtist = song.artist || '未知';
+
+  const userParts = [];
+  if (recentPlays) userParts.push(recentPlays);
+  userParts.push('');
+  userParts.push(`刚播完：${songArtist} -《${songName}》`);
+  if (song.tags) userParts.push(`标签：${song.tags}`);
+
+  const userPrompt = userParts.join('\n');
+
+  return { systemPrompt, userPrompt };
+}
+
 module.exports = {
   buildChatPrompt,
   buildRefillPrompt,
   buildBridgePrompt,
   buildColdOpenPrompt,
+  buildBackAnnouncePrompt,
 };

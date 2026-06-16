@@ -105,6 +105,9 @@ const useAppStore = create((set, get) => ({
   // Segments (Phase 1: bridge + cold_open storage; Phase 2: afterTrack playback)
   pendingSegments: [],
 
+  // Toast notifications
+  toast: null,
+
   // Queue
   queue: [],
 
@@ -239,6 +242,49 @@ const useAppStore = create((set, get) => ({
       if (musicIsPlaying && _ducking) _fadeMusicUp();
     });
     set({ isSpeaking: true });
+  },
+
+  /**
+   * Play cold_open narration first, then start the first song.
+   * No ducking needed — music isn't playing yet when this is called.
+   *
+   * @param {string} ttsUrl - Cold open TTS audio URL
+   * @param {string} trackUrl - First song audio URL
+   * @param {object} trackInfo - Track metadata
+   */
+  playColdOpenThenTrack: (ttsUrl, trackUrl, trackInfo) => {
+    get().initAudio();
+    const vol = get().volume;
+
+    // Preload the song but don't start — cold_open plays first
+    audio.src = trackUrl;
+    audio.preload = 'auto';
+    set({ currentTrack: trackInfo, isSpeaking: true });
+
+    const cleanup = () => {
+      ttsAudio.removeEventListener('ended', onEnd);
+      ttsAudio.removeEventListener('error', onError);
+    };
+    const startSong = () => {
+      cleanup();
+      audio.volume = vol;
+      audio.play().catch(console.error);
+      set({ isPlaying: true, isSpeaking: false });
+    };
+    const onEnd = startSong;
+    const onError = startSong;
+
+    ttsAudio.addEventListener('ended', onEnd);
+    ttsAudio.addEventListener('error', onError);
+
+    ttsAudio.src = ttsUrl;
+    ttsAudio.volume = vol;
+    ttsAudio.play().catch(() => {
+      cleanup();
+      audio.volume = vol;
+      audio.play().catch(console.error);
+      set({ isPlaying: true, isSpeaking: false });
+    });
   },
 
   /**
@@ -475,7 +521,35 @@ const useAppStore = create((set, get) => ({
    * Store a segment received via WebSocket.
    * Segments are kept in memory for later playback (bridge, afterTrack, etc.)
    */
+  setToast: (message) => {
+    set({ toast: message });
+    if (message) {
+      setTimeout(() => {
+        if (get().toast === message) set({ toast: null });
+      }, 4000);
+    }
+  },
+
   addPendingSegment: (segment) => {
+    // Immediate segments: play TTS right away, don't buffer
+    if (segment.position === 'immediate' && segment.ttsUrl && segment.ttsStatus === 'ready') {
+      get().initAudio();
+      const musicIsPlaying = audio.src && !audio.paused;
+      if (musicIsPlaying) _duckDown();
+
+      ttsAudio.src = segment.ttsUrl;
+      ttsAudio.volume = get().volume;
+      ttsAudio.play().then(() => {
+        set({ isSpeaking: true });
+      }).catch((err) => {
+        console.warn('[TTS] Immediate play failed:', err);
+        set({ isSpeaking: false });
+        if (musicIsPlaying && _ducking) _fadeMusicUp();
+        get().setToast(segment.text || '语音播放失败');
+      });
+      return;
+    }
+
     const { pendingSegments } = get();
     // Avoid duplicates by segment id
     const exists = pendingSegments.some(s => s.id === segment.id);

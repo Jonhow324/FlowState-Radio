@@ -504,7 +504,21 @@ router.post('/', async (req, res) => {
                     s => s.position === 'after_track' && s.afterTrackIndex === payload.gapIndex
                   );
                   if (brainBackAnnounce) {
-                    const backSeg = segmentEngine.buildBackAnnounceSegment(prev, payload.gapIndex, 'chat');
+                    const backInfo = await segmentEngine.generateBackAnnounceLLM(prev, brain.deepseek, {
+                      bridgeContext: personaLoader.buildBridgeContext(),
+                    });
+                    const backSeg = {
+                      id: `seg:back_announce:chat:${payload.gapIndex}`,
+                      type: 'back_announce',
+                      position: 'after_track',
+                      afterTrackIndex: payload.gapIndex,
+                      beforeTrackIndex: null,
+                      text: backInfo.text,
+                      ttsUrl: null,
+                      ttsStatus: 'pending',
+                      transitionStyle: backInfo.transitionStyle,
+                      metadata: { prevSong: { name: prev.name, artist: prev.artist }, backSource: backInfo.source },
+                    };
                     await segmentEngine.resolveSegmentTTS(backSeg);
                     state.addSegment(`after_track:${payload.gapIndex}`, backSeg);
                     broadcast({ type: 'segment-ready', data: backSeg });
@@ -530,7 +544,21 @@ router.post('/', async (req, res) => {
                       artist: payload.lastTrack.artist,
                       tags: state.getTrackMeta(payload.lastTrack.trackId)?.tags || '',
                     };
-                    const lastBack = segmentEngine.buildBackAnnounceSegment(lastTrack, payload.lastIdx, 'chat-last');
+                    const lastBackInfo = await segmentEngine.generateBackAnnounceLLM(lastTrack, brain.deepseek, {
+                      bridgeContext: personaLoader.buildBridgeContext(),
+                    });
+                    const lastBack = {
+                      id: `seg:back_announce:chat-last:${payload.lastIdx}`,
+                      type: 'back_announce',
+                      position: 'after_track',
+                      afterTrackIndex: payload.lastIdx,
+                      beforeTrackIndex: null,
+                      text: lastBackInfo.text,
+                      ttsUrl: null,
+                      ttsStatus: 'pending',
+                      transitionStyle: lastBackInfo.transitionStyle,
+                      metadata: { prevSong: { name: lastTrack.name, artist: lastTrack.artist }, backSource: lastBackInfo.source },
+                    };
                     await segmentEngine.resolveSegmentTTS(lastBack);
                     state.addSegment(`after_track:${payload.lastIdx}`, lastBack);
                     broadcast({ type: 'segment-ready', data: lastBack });
@@ -644,6 +672,18 @@ router.post('/', async (req, res) => {
                 broadcast({ type: 'now-playing', data: nowPlaying });
                 broadcast({ type: 'queue-update', data: { queue: state.getQueue() } });
               }
+            }
+          }
+        } else if (aiResult.segments && Array.isArray(aiResult.segments) && aiResult.segments.length > 0) {
+          // No tracks resolved but Brain returned segments — degrade to immediate
+          const immediateSegments = segmentEngine.normalizeSegments(aiResult.segments, []);
+          for (const seg of immediateSegments) {
+            if (seg.text) {
+              await segmentEngine.resolveSegmentTTS(seg);
+              if (seg.ttsUrl && broadcast) {
+                broadcast({ type: 'segment-ready', data: seg });
+              }
+              logger.info('CHAT', `Immediate segment: ${seg.type} — "${seg.text.slice(0, 50)}..."`);
             }
           }
         }

@@ -19,6 +19,7 @@ const VALID_POSITIONS = new Set([
   'before_track',
   'between_tracks',
   'after_track',
+  'immediate',        // Not bound to any track — plays immediately on arrival
 ]);
 
 // ── Normalization ─────────────────────────────────────────────
@@ -40,7 +41,7 @@ function normalizeSegments(rawSegments, tracks) {
       .map((s, i) => ({
         id: `seg:immediate:${i}`,
         type: VALID_TYPES.has(s.type) ? s.type : 'quick_touch',
-        position: 'before_track',
+        position: 'immediate',
         afterTrackIndex: null,
         beforeTrackIndex: null,
         text: (s.text || '').trim(),
@@ -87,6 +88,9 @@ function normalizeSegments(rawSegments, tracks) {
       case 'before_track':
         beforeTrackIndex = anchor;
         break;
+      case 'immediate':
+        // Not bound to any track — both indices stay null
+        break;
       default:
         afterTrackIndex = anchor;
         break;
@@ -111,7 +115,9 @@ function normalizeSegments(rawSegments, tracks) {
     }
 
     results.push({
-      id: `seg:${type}:${afterTrackIndex ?? beforeTrackIndex}:${i}`,
+      id: position === 'immediate'
+        ? `seg:${type}:immediate:${i}`
+        : `seg:${type}:${afterTrackIndex ?? beforeTrackIndex}:${i}`,
       type,
       position,
       afterTrackIndex,
@@ -146,6 +152,10 @@ function normalizeBridgeOutput(rawText, fallback) {
     .replace(/```[\s\S]*```/g, '')  // Remove markdown code blocks
     .replace(/^\d+[.、)\]]\s*/, '') // Remove numbering prefixes
     .trim();
+
+  if (cleaned !== (rawText || '').trim()) {
+    logger.info('SEGMENT', `[Bridge] cleaned: "${rawText}" → "${cleaned}"`);
+  }
 
   // Step 2: Empty check — only reject truly empty/gibberish output
   if (!cleaned) {
@@ -201,6 +211,13 @@ async function generateBridgeLLM(prevSong, nextSong, deepseek, options = {}) {
     // Normalize output through validation pipeline
     const result = normalizeBridgeOutput(rawText, fallback);
 
+    if (result.source === 'llm') {
+      logger.info('SEGMENT', `[Bridge] ${prevSong.artist}→${nextSong.artist} ✅ LLM: "${result.text}"`);
+    } else {
+      logger.warn('SEGMENT', `[Bridge] ${prevSong.artist}→${nextSong.artist} ⚠️ LLM text discarded (${result.dedup || 'empty'}), using template: "${result.text}"`);
+      logger.info('SEGMENT', `[Bridge] LLM raw was: "${rawText}"`);
+    }
+
     // Record in history for future dedup checks
     if (result.source === 'llm') {
       recordBridgeText(result.text);
@@ -209,6 +226,48 @@ async function generateBridgeLLM(prevSong, nextSong, deepseek, options = {}) {
     return { text: result.text, transitionStyle: 'outro', source: result.source };
   } catch (err) {
     logger.warn('SEGMENT', `LLM bridge failed: ${err.message}, falling back to template`);
+    return { ...fallback, source: 'template' };
+  }
+}
+
+// ── Back Announce LLM Generation ─────────────────────────────
+
+/**
+ * Generate a back_announce segment using LLM.
+ * Falls back to template-based generateBackAnnounce() on failure.
+ *
+ * @param {object} song - { name, artist, tags? }
+ * @param {object} deepseek - Brain's DeepSeek instance with rawChat()
+ * @param {object} [options] - { bridgeContext, temperature, maxTokens, timeout }
+ * @returns {object} { text, transitionStyle, source }
+ */
+async function generateBackAnnounceLLM(song, deepseek, options = {}) {
+  const fallback = generateBackAnnounce(song);
+  if (!deepseek || typeof deepseek.rawChat !== 'function') {
+    return { ...fallback, source: 'template' };
+  }
+  const bridgeContext = options.bridgeContext || null;
+  const { systemPrompt, userPrompt } = promptBuilders.buildBackAnnouncePrompt(song, bridgeContext);
+  const rawOptions = {
+    temperature: options.temperature ?? 0.8,
+    maxTokens: options.maxTokens ?? 120,
+    timeout: options.timeout ?? 15000,
+  };
+  try {
+    const rawText = await deepseek.rawChat(systemPrompt, userPrompt, rawOptions);
+    const cleaned = (rawText || '')
+      .replace(/^["'"「『【《\s]+/, '')
+      .replace(/["'"」』】》\s]+$/, '')
+      .trim();
+    if (cleaned) {
+      logger.info('SEGMENT', `[BackAnnounce] ${song.artist} ✅ LLM: "${cleaned}"`);
+      return { text: cleaned, transitionStyle: 'none', source: 'llm' };
+    } else {
+      logger.warn('SEGMENT', `[BackAnnounce] ${song.artist} ⚠️ LLM empty, using template: "${fallback.text}"`);
+      return { ...fallback, source: 'template' };
+    }
+  } catch (err) {
+    logger.warn('SEGMENT', `LLM back_announce failed: ${err.message}, falling back to template`);
     return { ...fallback, source: 'template' };
   }
 }
@@ -659,6 +718,9 @@ function getSegmentsForTrack(segmentMap, trackIndex) {
 function buildSegmentMap(segments) {
   const map = new Map();
   for (const seg of segments) {
+    // Immediate segments are not bound to any track — skip them
+    if (seg.position === 'immediate') continue;
+
     const index = seg.position === 'before_track'
       ? (seg.beforeTrackIndex ?? seg.afterTrackIndex)
       : (seg.afterTrackIndex ?? seg.beforeTrackIndex);
@@ -676,6 +738,7 @@ module.exports = {
   generateBridgeLLM,
   generateColdOpen,
   generateBackAnnounce,
+  generateBackAnnounceLLM,
   fillMissingSegments,
   resolveSegmentTTS,
   dedupCheck,

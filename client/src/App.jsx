@@ -19,6 +19,7 @@ const VIEWS = {
 function App() {
   const [activeView, setActiveView] = useState('player');
   const isRadioStarted = useAppStore((s) => s.isRadioStarted);
+  const toast = useAppStore((s) => s.toast);
   const ActiveComponent = VIEWS[activeView];
 
   // Enable system media controls (lock screen, notification bar)
@@ -65,6 +66,24 @@ function App() {
 
       {/* Bottom Navigation */}
       <NavBar activeView={activeView} onViewChange={setActiveView} />
+
+      {/* Toast notification */}
+      <AnimatePresence>
+        {toast && (
+          <motion.div
+            initial={{ opacity: 0, y: 30 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 30 }}
+            transition={{ duration: 0.3 }}
+            className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50
+                       px-5 py-3 rounded-xl max-w-sm text-center
+                       bg-black/80 text-white/90 text-sm backdrop-blur-sm
+                       shadow-lg pointer-events-none"
+          >
+            {toast}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

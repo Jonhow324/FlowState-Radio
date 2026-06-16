@@ -74,6 +74,8 @@ describe('Segment Engine', () => {
       expect(result).toHaveLength(2);
       expect(result[0].type).toBe('cold_open');
       expect(result[1].type).toBe('quick_touch');
+      expect(result[0].position).toBe('immediate');
+      expect(result[1].position).toBe('immediate');
       expect(result[0].afterTrackIndex).toBeNull();
       expect(result[0].beforeTrackIndex).toBeNull();
     });
@@ -192,6 +194,28 @@ describe('Segment Engine', () => {
       const result = normalizeSegments(raw, tracks);
       expect(result[0].metadata.prevSong.name).toBe('Song A');
       expect(result[0].metadata.nextSong.name).toBe('Song B');
+    });
+
+    it('immediate segments have null indices and correct ID format', () => {
+      const raw = [{ type: 'quick_touch', text: '随感', position: 'immediate' }];
+      const result = normalizeSegments(raw, sampleTracks);
+      expect(result[0].position).toBe('immediate');
+      expect(result[0].afterTrackIndex).toBeNull();
+      expect(result[0].beforeTrackIndex).toBeNull();
+      expect(result[0].id).toMatch(/^seg:quick_touch:immediate:\d+$/);
+    });
+
+    it('immediate position from raw input is preserved when tracks exist', () => {
+      const raw = [
+        { type: 'cold_open', text: '开场', position: 'immediate' },
+        { type: 'bridge', text: '过渡', anchor: 0 },
+      ];
+      const result = normalizeSegments(raw, sampleTracks);
+      expect(result[0].position).toBe('immediate');
+      expect(result[0].afterTrackIndex).toBeNull();
+      expect(result[0].beforeTrackIndex).toBeNull();
+      expect(result[1].position).toBe('between_tracks');
+      expect(result[1].afterTrackIndex).toBe(0);
     });
   });
 
@@ -416,6 +440,16 @@ describe('Segment Engine', () => {
       const map = buildSegmentMap(segments);
       expect(map.size).toBe(1);
       expect(map.get('before_track:0').text).toBe('second');
+    });
+
+    it('skips immediate segments (not bound to any track)', () => {
+      const segments = [
+        { position: 'immediate', afterTrackIndex: null, beforeTrackIndex: null, type: 'quick_touch' },
+        { position: 'between_tracks', afterTrackIndex: 0, beforeTrackIndex: 1, type: 'bridge' },
+      ];
+      const map = buildSegmentMap(segments);
+      expect(map.size).toBe(1);
+      expect(map.has('between_tracks:0')).toBe(true);
     });
   });
 

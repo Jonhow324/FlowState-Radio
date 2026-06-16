@@ -27,9 +27,9 @@ function useWebSocket() {
             albumArt: data.albumArt || null,
           };
 
-          // Handle cold_open segment (opening narration before first song)
-          if (data.coldOpen) {
-            store.addPendingSegment(data.coldOpen);
+          // Show cold_open text as DJ message
+          if (data.coldOpen?.text) {
+            store.setDjMessage(data.coldOpen.text);
           }
 
           // Handle afterTrack segment (back_announce after this song ends)
@@ -37,7 +37,10 @@ function useWebSocket() {
             store.addPendingSegment(data.afterTrack);
           }
 
-          if (data.ttsUrl && (transitionStyle === 'intro' || transitionStyle === 'outro')) {
+          if (data.coldOpen?.ttsUrl) {
+            // Cold open present: play narration first, then start the song
+            store.playColdOpenThenTrack(data.coldOpen.ttsUrl, data.url, trackInfo);
+          } else if (data.ttsUrl && (transitionStyle === 'intro' || transitionStyle === 'outro')) {
             // Intro/Outro mode: play song under DJ voice with ducking
             if (data.fillerType) store.setFillerType(data.fillerType);
             store.playWithTTS(data.ttsUrl, data.url, trackInfo, transitionStyle);
